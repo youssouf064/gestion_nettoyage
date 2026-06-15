@@ -19,18 +19,29 @@
         input, select, button { width: 100%; padding: 10px; border-radius: 5px; border: 1px solid #ccc; box-sizing: border-box; }
         button { background-color: #2980b9; color: white; font-weight: bold; border: none; cursor: pointer; margin-top: 10px; }
         table { width: 100%; border-collapse: collapse; background: white; margin-bottom: 30px; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; vertical-align: middle; }
         th { background-color: #34495e; color: white; }
         .badge { padding: 4px 8px; border-radius: 12px; font-size: 0.85rem; font-weight: bold; color: white; }
         .badge.green { background-color: #2ecc71; }
         .badge.orange { background-color: #e67e22; }
+        
+        /* Styles spécifiques pour les boutons d'action */
+        .btn-action { display: inline-block; padding: 6px 12px; border-radius: 4px; text-decoration: none; font-size: 0.85rem; font-weight: bold; color: white; border: none; cursor: pointer; }
+        .btn-warning { background-color: #f39c12; }
+        .btn-warning:hover { background-color: #d35400; }
+        .btn-danger { background-color: #e74c3c; }
+        .btn-danger:hover { background-color: #c0392b; }
+        .text-end { text-align: right; }
     </style>
 </head>
 <body>
 
 <div class="container">
+    <a href="/deconnexion" style="float: right; background-color: #e74c3c; color: white; padding: 10px 15px; text-decoration: none; border-radius: 5px; font-weight: bold; margin-top: 5px;">🔒 Fermer la session Admin</a>
+    
     <h1>💼 Direction Générale — Panneau d'Administration</h1>
     <br>
+    
     <a href="/paie" style="display: inline-block; padding: 12px 20px; background-color: #27ae60; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">💵 Consulter le Rapport de Paie Global</a>
     <a href="/pointage" target="_blank" style="display: inline-block; padding: 12px 20px; background-color: #9b59b6; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; margin-left: 10px;">📱 Ouvrir l'Espace Équipe Terrain</a>
 
@@ -48,6 +59,7 @@
                 <button type="submit" style="background-color: #e67e22;">➕ Créer le Site</button>
             </form>
         </div>
+        
         <div class="box" style="border-top: 4px solid #2980b9;">
             <h3>👤 Enregistrer une Fiche Employé</h3>
             <form action="/ajouter_employe" method="POST">
@@ -75,26 +87,60 @@
         </div>
     </div>
 
-    <h2>Suivi en Direct des Chantiers</h2>
+    <h2>Suivi en Direct et Gestion des Chantiers</h2>
     <table>
-        <thead><tr><th>Nom du Site</th><th>Localisation</th><th>Employés présents en ce moment</th></tr></thead>
+        <thead>
+            <tr>
+                <th>Nom du Site</th>
+                <th>Localisation</th>
+                <th>Employés présents</th>
+                <th class="text-end" style="padding-right: 25px;">Actions</th>
+            </tr>
+        </thead>
         <tbody>
             {% for s in sites %}
-            <tr><td><strong>{{ s[1] }}</strong></td><td>📍 {{ s[2] if s[2] else 'Non spécifiée' }}</td><td><span class="badge {% if s[3]>0 %}green{% else %}orange{% endif %}">{{ s[3] }} présents</span></td></tr>
+            <tr>
+                <td><strong>{{ s[1] }}</strong></td>
+                <td>📍 {{ s[2] if s[2] else 'Non spécifiée' }}</td>
+                <td>
+                    <span class="badge {% if s[3]>0 %}green{% else %}orange{% endif %}">
+                        {{ s[3] }} présents
+                    </span>
+                </td>
+                <td class="text-end">
+                    <a href="/modifier_site/{{ s[0] }}" class="btn-action btn-warning" style="margin-right: 5px;">Modifier</a>
+                    
+                    <form action="/supprimer_site/{{ s[0] }}" method="POST" style="display:inline;" onsubmit="return confirm('Attention : Confirmez-vous la rupture de contrat et la suppression définitive de ce site ?');">
+                        <button type="submit" class="btn-action btn-danger" style="width:auto; margin-top:0;">Supprimer</button>
+                    </form>
+                </td>
+            </tr>
             {% endfor %}
         </tbody>
     </table>
 
     <h2>Registre Général du Personnel</h2>
     <table>
-        <thead><tr><th>Matricule</th><th>Nom & Prénom</th><th>Site Attitré</th><th>Salaire Base</th><th>Statut</th><th>Action</th></tr></thead>
+        <thead>
+            <tr>
+                <th>Matricule</th>
+                <th>Nom & Prénom</th>
+                <th>Site Attitré</th>
+                <th>Salaire Base</th>
+                <th>Statut</th>
+                <th>Action</th>
+            </tr>
+        </thead>
         <tbody>
             {% for e in employes %}
             <tr>
-                <td><code>{{ e[0] }}</code></td><td><strong>{{ e[2] }} {{ e[1] }}</strong></td><td>🏢 {{ e[5] if e[5] else 'Aucun' }}</td><td>{{ e[3] }} MRU</td>
+                <td><code>{{ e[0] }}</code></td>
+                <td><strong>{{ e[2] }} {{ e[1] }}</strong></td>
+                <td>🏢 {{ e[5] if e[5] else 'Aucun' }}</td>
+                <td>{{ e[3] }} MRU</td>
                 <td><span class="badge {% if e[4]=='Actif' %}green{% else %}orange{% endif %}">{{ e[4] }}</span></td>
                 <td>
-                    <form action="/supprimer_employe/{{ e[0] }}" method="POST" onsubmit="return confirm('Supprimer définitivement ?');">
+                    <form action="/supprimer_employe/{{ e[0] }}" method="POST" onsubmit="return confirm('Supprimer définitivement cet employé ?');">
                         <button type="submit" style="background-color:#e74c3c; margin:0; padding:5px 10px; font-size:0.8rem; width:auto;">🗑️ Licencier / Retirer</button>
                     </form>
                 </td>
