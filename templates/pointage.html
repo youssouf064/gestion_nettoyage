@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Espace Superviseur - Pointage Terrain</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background-color: #eef2f3; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .mobile-card { background: white; width: 100%; max-width: 400px; padding: 25px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); text-align: center; }
+        h2 { color: #2c3e50; margin-bottom: 5px; }
+        p.subtitle { color: #e67e22; font-size: 0.95rem; font-weight: bold; margin-bottom: 25px; text-transform: uppercase; letter-spacing: 0.5px; }
+        label { display: block; text-align: left; font-weight: bold; margin-bottom: 8px; color: #34495e; }
+        select { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #bdc3c7; font-size: 1rem; margin-bottom: 20px; background-color: #fff; }
+        .btn-capture { width: 100%; padding: 15px; border-radius: 8px; font-size: 1.1rem; font-weight: bold; border: none; color: white; cursor: pointer; margin-bottom: 12px; transition: transform 0.2s; }
+        .btn-capture:active { transform: scale(0.98); }
+        .btn-in { background-color: #2ecc71; box-shadow: 0 4px 10px rgba(46, 204, 113, 0.3); }
+        .btn-out { background-color: #e74c3c; box-shadow: 0 4px 10px rgba(231, 76, 60, 0.3); }
+        #gps-status { font-size: 0.85rem; color: #7f8c8d; margin-top: 15px; font-style: italic; }
+        .info-box { background-color: #f8f9fa; border-left: 4px solid #e67e22; padding: 10px; text-align: left; margin-bottom: 20px; font-size: 0.9rem; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+<div class="mobile-card">
+    <h2>⏱️ Portail Terrain</h2>
+    <p class="subtitle">Espace Chef d'Équipe</p>
+    
+    <div class="info-box">
+        <strong>Rappel Superviseur :</strong> Veuillez sélectionner l'agent présent devant vous et valider son état de présence sur le site.
+    </div>
+    
+    <form id="formPointage" action="/executer_pointage" method="POST">
+        <input type="hidden" id="latitude" name="latitude">
+        <input type="hidden" id="longitude" name="longitude">
+        <input type="hidden" id="actionInput" name="action" value="arrivee">
+
+        <label>Sélectionnez l'Agent :</label>
+        <select name="matricule" required>
+            {% for e in employes %}
+                <option value="{{ e[0] }}">{{ e[2] }} {{ e[1] }} ({{ e[0] }})</option>
+            {% endfor %}
+        </select>
+
+        <label>Site Client Actuel :</label>
+        <select name="site_id" required>
+            {% for s in sites %}
+                <option value="{{ s[0] }}">{{ s[1] }}</option>
+            {% endfor %}
+        </select>
+
+        <button type="button" onclick="soumettreAvecGPS('arrivee')" class="btn-capture btn-in">📍 Pointer l'Arrivée de l'Agent</button>
+        <button type="button" onclick="soumettreAvecGPS('depart')" class="btn-capture btn-out">🚪 Pointer le Départ de l'Agent</button>
+    </form>
+
+    <div id="gps-status">Recherche du signal GPS du superviseur...</div>
+</div>
+
+<script>
+    if (navigator.geolocation) {
+        navigator.geolocation.watchPosition(function(position) {
+            document.getElementById('latitude').value = position.coords.latitude;
+            document.getElementById('longitude').value = position.coords.longitude;
+            document.getElementById('gps-status').innerHTML = "🔒 Position du Superviseur Validée par GPS";
+            document.getElementById('gps-status').style.color = "#2ecc71";
+        }, function(error) {
+            document.getElementById('gps-status').innerHTML = "⚠️ Activez le GPS pour valider votre présence sur site";
+            document.getElementById('gps-status').style.color = "#e74c3c";
+        }, { enableHighAccuracy: true });
+    } else {
+        document.getElementById('gps-status').innerHTML = "Géolocalisation non supportée";
+    }
+
+    function soumettreAvecGPS(actionType) {
+        document.getElementById('actionInput').value = actionType;
+        document.getElementById('formPointage').submit();
+    }
+</script>
+
+</body>
+</html>
