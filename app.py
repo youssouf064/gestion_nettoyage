@@ -12,6 +12,8 @@ if IS_RENDER:
     # Si on est sur Render -> On utilise PostgreSQL (Neon)
     import psycopg2
     DATABASE_URL = os.environ.get('DATABASE_URL')
+    if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 else:
     # Si on est sur le Chromebook -> On utilise MySQL/MariaDB local
     import mysql.connector
@@ -99,10 +101,6 @@ def init_db():
 # Lance l'initialisation au démarrage
 init_db()
 
-def get_db_connection():
-    conn = mysql.connector.connect(**DB_CONFIG)
-    return conn
-
 # Le code secret que seule la direction doit connaître
 CODE_SECRET_ADMIN = "1234"
 
@@ -121,7 +119,7 @@ def dashboard():
         return render_template('connexion_admin.html', erreur=None)
 
     conn = get_db_connection()
-    cursor = conn.cursor() # Pas besoin de dictionnaire car les indices numériques [0] sont utilisés ci-dessous
+    cursor = conn.cursor()
     
     # 1. Statistiques Globales
     cursor.execute("SELECT COUNT(*) FROM employes WHERE statut = 'Actif'")
@@ -129,10 +127,11 @@ def dashboard():
     cursor.execute("SELECT COUNT(*) FROM employes WHERE statut = 'En congé'")
     total_conges = cursor.fetchone()[0]
     
-    # 2. Liste des sites avec nombre de présents (Correction syntaxe CURDATE() de MySQL)
-    cursor.execute('''
+    # 2. Liste des sites avec nombre de présents (Détection dynamique de la fonction Date)
+    fonction_date = "CURRENT_DATE" if IS_RENDER else "CURDATE()"
+    cursor.execute(f'''
         SELECT s.id, s.nom, s.adresse,
-        (SELECT COUNT(*) FROM pointages p WHERE p.id_site = s.id AND p.date_jour = CURDATE() AND p.heure_depart IS NULL) as presents
+        (SELECT COUNT(*) FROM pointages p WHERE p.id_site = s.id AND p.date_jour = {fonction_date} AND p.heure_depart IS NULL) as presents
         FROM sites s
     ''')
     liste_sites = cursor.fetchall()
@@ -363,18 +362,24 @@ def executer_pointage():
         ''', (heure_actuelle, matricule, date_aujourdhui))
         
         if cursor.rowcount == 0:
-            # Sous-requête modifiée pour la compatibilité stricte de mise à jour MySQL
-            cursor.execute('''
-                UPDATE pointages 
-                SET heure_depart = %s 
-                WHERE id = (
-                    SELECT id FROM (
-                        SELECT id FROM pointages 
-                        WHERE matricule_employe = %s AND heure_depart IS NULL 
-                        ORDER BY id DESC LIMIT 1
-                    ) as t
-                )
-            ''', (heure_actuelle, matricule))
+            if IS_RENDER:
+                cursor.execute('''
+                    UPDATE pointages 
+                    SET heure_depart = %s 
+                    WHERE matricule_employe = %s AND heure_depart IS NULL
+                ''', (heure_actuelle, matricule))
+            else:
+                cursor.execute('''
+                    UPDATE pointages 
+                    SET heure_depart = %s 
+                    WHERE id = (
+                        SELECT id FROM (
+                            SELECT id FROM pointages 
+                            WHERE matricule_employe = %s AND heure_depart IS NULL 
+                            ORDER BY id DESC LIMIT 1
+                        ) as t
+                    )
+                ''', (heure_actuelle, matricule))
             
     conn.commit()
     cursor.close()
