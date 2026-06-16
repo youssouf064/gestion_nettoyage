@@ -127,8 +127,12 @@ def dashboard():
     cursor.execute("SELECT COUNT(*) FROM employes WHERE statut = 'En congé'")
     total_conges = cursor.fetchone()[0]
     
-    # 2. Liste des sites avec nombre de présents (Détection dynamique de la fonction Date)
-    fonction_date = "CURRENT_DATE" if IS_RENDER else "CURDATE()"
+    # 2. Liste des sites avec nombre de présents (Correction stricte du type pour PostgreSQL vs MySQL)
+    if IS_RENDER:
+        fonction_date = "CURRENT_DATE::text"
+    else:
+        fonction_date = "CURDATE()"
+
     cursor.execute(f'''
         SELECT s.id, s.nom, s.adresse,
         (SELECT COUNT(*) FROM pointages p WHERE p.id_site = s.id AND p.date_jour = {fonction_date} AND p.heure_depart IS NULL) as presents
