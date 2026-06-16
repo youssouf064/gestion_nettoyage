@@ -1,67 +1,127 @@
-from flask import Flask, render_template, request, redirect, url_for, jsonify, session
-import sqlite3
+import os
 from datetime import datetime
+from flask import Flask, render_template, request, redirect, url_for, jsonify, session
 
 app = Flask(__name__)
-# Clé secrète nécessaire pour activer les sessions sécurisées sous Flask
 app.secret_key = "cle_secrete_super_securisee_youssouf"
-DB_NAME = "nettoyage.db"
+
+# --- CONFIGURATION HYBRIDE (NEON SUR RENDER / MYSQL EN LOCAL) ---
+IS_RENDER = 'RENDER' in os.environ
+
+if IS_RENDER:
+    # Si on est sur Render -> On utilise PostgreSQL (Neon)
+    import psycopg2
+    DATABASE_URL = os.environ.get('DATABASE_URL')
+else:
+    # Si on est sur le Chromebook -> On utilise MySQL/MariaDB local
+    import mysql.connector
+    DB_CONFIG_LOCAL = {
+        'host': 'localhost',
+        'user': 'root',
+        'password': 'root',
+        'database': 'gestion_nettoyage'
+    }
+
+def get_db_connection():
+    if IS_RENDER:
+        # Connexion PostgreSQL pour Neon (Render)
+        return psycopg2.connect(DATABASE_URL)
+    else:
+        # Connexion MySQL pour le Chromebook
+        return mysql.connector.connect(**DB_CONFIG_LOCAL)
+
+def init_db():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Adaptations de requêtes selon la base de données détectée
+    if IS_RENDER:
+        # Syntaxe PostgreSQL pour Neon
+        cursor.execute('''CREATE TABLE IF NOT EXISTS sites (
+            id SERIAL PRIMARY KEY, 
+            nom VARCHAR(255) NOT NULL, 
+            adresse VARCHAR(255),
+            latitude REAL,
+            longitude REAL
+        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS employes (
+            matricule VARCHAR(100) PRIMARY KEY, 
+            nom VARCHAR(255) NOT NULL, 
+            prenom VARCHAR(255) NOT NULL, 
+            salaire_base REAL NOT NULL, 
+            statut VARCHAR(50) DEFAULT 'Actif',
+            id_site_affecte INT,
+            FOREIGN KEY(id_site_affecte) REFERENCES sites(id) ON DELETE SET NULL
+        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS pointages (
+            id SERIAL PRIMARY KEY,
+            matricule_employe VARCHAR(100),
+            id_site INT,
+            date_jour VARCHAR(50) NOT NULL,
+            heure_arrivee VARCHAR(50),
+            heure_depart VARCHAR(50),
+            FOREIGN KEY(matricule_employe) REFERENCES employes(matricule) ON DELETE CASCADE,
+            FOREIGN KEY(id_site) REFERENCES sites(id) ON DELETE CASCADE
+        )''')
+    else:
+        # Syntaxe MySQL pour ton Chromebook
+        cursor.execute('''CREATE TABLE IF NOT EXISTS sites (
+            id INT AUTO_INCREMENT PRIMARY KEY, 
+            nom VARCHAR(255) NOT NULL, 
+            adresse VARCHAR(255),
+            latitude REAL,
+            longitude REAL
+        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS employes (
+            matricule VARCHAR(100) PRIMARY KEY, 
+            nom VARCHAR(255) NOT NULL, 
+            prenom VARCHAR(255) NOT NULL, 
+            salaire_base REAL NOT NULL, 
+            statut VARCHAR(50) DEFAULT 'Actif',
+            id_site_affecte INT,
+            FOREIGN KEY(id_site_affecte) REFERENCES sites(id) ON DELETE SET NULL
+        )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS pointages (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            matricule_employe VARCHAR(100),
+            id_site INT,
+            date_jour VARCHAR(50) NOT NULL,
+            heure_arrivee VARCHAR(50),
+            heure_depart VARCHAR(50),
+            FOREIGN KEY(matricule_employe) REFERENCES employes(matricule) ON DELETE CASCADE,
+            FOREIGN KEY(id_site) REFERENCES sites(id) ON DELETE CASCADE
+        )''')
+        
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+# Lance l'initialisation au démarrage
+init_db()
+
+def get_db_connection():
+    conn = mysql.connector.connect(**DB_CONFIG)
+    return conn
 
 # Le code secret que seule la direction doit connaître
 CODE_SECRET_ADMIN = "1234"
-
-def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS sites (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, 
-        nom TEXT NOT NULL, 
-        adresse TEXT,
-        latitude REAL,
-        longitude REAL
-    )''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS employes (
-        matricule TEXT PRIMARY KEY, 
-        nom TEXT NOT NULL, 
-        prenom TEXT NOT NULL, 
-        salaire_base REAL NOT NULL, 
-        statut TEXT DEFAULT 'Actif',
-        id_site_affecte INTEGER,
-        FOREIGN KEY(id_site_affecte) REFERENCES sites(id)
-    )''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS pointages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        matricule_employe TEXT,
-        id_site INTEGER,
-        date_jour TEXT NOT NULL,
-        heure_arrivee TEXT,
-        heure_depart TEXT,
-        FOREIGN KEY(matricule_employe) REFERENCES employes(matricule),
-        FOREIGN KEY(id_site) REFERENCES sites(id)
-    )''')
-    conn.close()
-
-init_db()
 
 # --- ACCÈS ET CONTRÔLE DU BUREAU PRINCIPAL ---
 
 @app.route('/', methods=['GET', 'POST'])
 def dashboard():
-    # Si la direction soumet le code PIN secret
     if request.method == 'POST':
         code_saisi = request.form.get('code_admin')
         if code_saisi == CODE_SECRET_ADMIN:
-            session['est_admin'] = True  # Mémorise l'autorisation
+            session['est_admin'] = True  
         else:
             return render_template('connexion_admin.html', erreur="Code incorrect. Accès refusé.")
 
-    # Vérification stricte : si pas connecté admin, on affiche la page de verrouillage
     if not session.get('est_admin'):
         return render_template('connexion_admin.html', erreur=None)
 
-    # --- SÉQUENCE D'AFFICHAGE DU DASHBOARD (ADMIN VALIDÉ) ---
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    conn = get_db_connection()
+    cursor = conn.cursor() # Pas besoin de dictionnaire car les indices numériques [0] sont utilisés ci-dessous
     
     # 1. Statistiques Globales
     cursor.execute("SELECT COUNT(*) FROM employes WHERE statut = 'Actif'")
@@ -69,10 +129,10 @@ def dashboard():
     cursor.execute("SELECT COUNT(*) FROM employes WHERE statut = 'En congé'")
     total_conges = cursor.fetchone()[0]
     
-    # 2. Liste des sites avec NOMBRE D'EMPLOYÉS PRÉSENTS EN CE MOMENT
+    # 2. Liste des sites avec nombre de présents (Correction syntaxe CURDATE() de MySQL)
     cursor.execute('''
         SELECT s.id, s.nom, s.adresse,
-        (SELECT COUNT(*) FROM pointages p WHERE p.id_site = s.id AND p.date_jour = date('now') AND p.heure_depart IS NULL) as presents
+        (SELECT COUNT(*) FROM pointages p WHERE p.id_site = s.id AND p.date_jour = CURDATE() AND p.heure_depart IS NULL) as presents
         FROM sites s
     ''')
     liste_sites = cursor.fetchall()
@@ -99,6 +159,7 @@ def dashboard():
     ''')
     historique_pointages = cursor.fetchall()
     
+    cursor.close()
     conn.close()
     
     return render_template('dashboard.html', 
@@ -112,12 +173,11 @@ def dashboard():
 
 @app.route('/deconnexion')
 def deconnexion():
-    """Permet à la directrice de fermer sa session admin en un clic."""
     session.pop('est_admin', None)
     return redirect(url_for('espace_pointage'))
 
 
-# --- SÉCURISATION DES ACTIONS ADMINISTRATIVE (PROTECTION DES ROUTES) ---
+# --- SÉCURISATION DES ACTIONS ADMINISTRATIVE ---
 
 @app.route('/ajouter_site', methods=['POST'])
 def ajouter_site():
@@ -127,10 +187,11 @@ def ajouter_site():
     nom_site = request.form.get('nom_site').strip()
     adresse_site = request.form.get('adresse_site').strip()
     if nom_site:
-        conn = sqlite3.connect(DB_NAME)
+        conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO sites (nom, adresse) VALUES (?, ?)", (nom_site, adresse_site))
+        cursor.execute("INSERT INTO sites (nom, adresse) VALUES (%s, %s)", (nom_site, adresse_site))
         conn.commit()
+        cursor.close()
         conn.close()
     return redirect(url_for('dashboard'))
 
@@ -148,13 +209,14 @@ def ajouter_employe():
     site_id = request.form.get('site_id')
     
     if matricule and nom and prenom and salaire:
-        conn = sqlite3.connect(DB_NAME)
+        conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
             INSERT INTO employes (matricule, nom, prenom, salaire_base, statut, id_site_affecte)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
         ''', (matricule, nom, prenom, float(salaire), statut, int(site_id)))
         conn.commit()
+        cursor.close()
         conn.close()
     return redirect(url_for('dashboard'))
 
@@ -164,11 +226,12 @@ def supprimer_employe(matricule):
     if not session.get('est_admin'):
         return redirect(url_for('espace_pointage'))
 
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM pointages WHERE matricule_employe = ?", (matricule,))
-    cursor.execute("DELETE FROM employes WHERE matricule = ?", (matricule,))
+    cursor.execute("DELETE FROM pointages WHERE matricule_employe = %s", (matricule,))
+    cursor.execute("DELETE FROM employes WHERE matricule = %s", (matricule,))
     conn.commit()
+    cursor.close()
     conn.close()
     return redirect(url_for('dashboard'))
 
@@ -178,7 +241,7 @@ def rapport_paie():
     if not session.get('est_admin'):
         return redirect(url_for('espace_pointage'))
 
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT matricule, nom, prenom, salaire_base FROM employes")
     liste_employes = cursor.fetchall()
@@ -186,7 +249,7 @@ def rapport_paie():
     bilan_paie = []
     for emp in liste_employes:
         matricule, nom, prenom, salaire_base = emp
-        cursor.execute('SELECT heure_arrivee, heure_depart FROM pointages WHERE matricule_employe = ? AND heure_depart IS NOT NULL', (matricule,))
+        cursor.execute('SELECT heure_arrivee, heure_depart FROM pointages WHERE matricule_employe = %s AND heure_depart IS NOT NULL', (matricule,))
         pointages = cursor.fetchall()
         
         total_heures = 0.0
@@ -201,6 +264,7 @@ def rapport_paie():
             'heures': total_heures, 'taux': taux_horaire, 'salaire_du': salaire_gagne
         })
         
+    cursor.close()
     conn.close()
     return render_template('paie.html', bilan=bilan_paie)
 
@@ -210,15 +274,16 @@ def supprimer_site(id):
     if not session.get('est_admin'):
         return redirect(url_for('espace_pointage'))
 
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("DELETE FROM pointages WHERE id_site = ?", (id,))
-        cursor.execute("DELETE FROM sites WHERE id = ?", (id,))
+        cursor.execute("DELETE FROM pointages WHERE id_site = %s", (id,))
+        cursor.execute("DELETE FROM sites WHERE id = %s", (id,))
         conn.commit()
-    except sqlite3.Error as e:
+    except Exception as e:
         print(f"Erreur lors de la suppression : {e}")
     finally:
+        cursor.close()
         conn.close()
     return redirect(url_for('dashboard'))
 
@@ -228,22 +293,23 @@ def modifier_site(id):
     if not session.get('est_admin'):
         return redirect(url_for('espace_pointage'))
 
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
     
     if request.method == 'POST':
         nouveau_nom = request.form.get('nom_site')
         nouvelle_adresse = request.form.get('adresse') or request.form.get('adresse_site')
         
-        cursor.execute("UPDATE sites SET nom = ?, adresse = ? WHERE id = ?", 
+        cursor.execute("UPDATE sites SET nom = %s, adresse = %s WHERE id = %s", 
                        (nouveau_nom, nouvelle_adresse, id))
         conn.commit()
+        cursor.close()
         conn.close()
         return redirect(url_for('dashboard'))
     
-    # Partie GET
-    cursor.execute("SELECT id, nom, adresse FROM sites WHERE id = ?", (id,))
+    cursor.execute("SELECT id, nom, adresse FROM sites WHERE id = %s", (id,))
     site_data = cursor.fetchone()
+    cursor.close()
     conn.close()
     
     if not site_data:
@@ -253,16 +319,17 @@ def modifier_site(id):
     return render_template('modifier_site.html', site=site)
 
 
-# --- ESPACE CHIEF D'ÉQUIPE / EMPLOYÉ SUR TERRAIN (LIBRE D'ACCÈS) ---
+# --- ESPACE CHEF D'ÉQUIPE (LIBRE D'ACCÈS) ---
 
 @app.route('/pointage')
 def espace_pointage():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT matricule, nom, prenom FROM employes WHERE statut = 'Actif'")
     liste_employes = cursor.fetchall()
     cursor.execute("SELECT id, nom FROM sites")
     liste_sites = cursor.fetchall()
+    cursor.close()
     conn.close()
     return render_template('pointage.html', employes=liste_employes, sites=liste_sites)
 
@@ -274,39 +341,43 @@ def executer_pointage():
     action = request.form.get('action')
     lat = request.form.get('latitude')
     lng = request.form.get('longitude')
-    
+
     print(f"Pointage reçu pour {matricule} au site {site_id}. Action: {action}. GPS: {lat}, {lng}")
     
     date_aujourdhui = datetime.now().strftime('%Y-%m-%d')
     heure_actuelle = datetime.now().strftime('%H:%M:%S')
     
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
     
     if action == 'arrivee':
         cursor.execute('''
             INSERT INTO pointages (matricule_employe, id_site, date_jour, heure_arrivee)
-            VALUES (?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s)
         ''', (matricule, int(site_id), date_aujourdhui, heure_actuelle))
     elif action == 'depart':
         cursor.execute('''
             UPDATE pointages 
-            SET heure_depart = ? 
-            WHERE matricule_employe = ? AND date_jour = ? AND heure_depart IS NOT NULL
+            SET heure_depart = %s 
+            WHERE matricule_employe = %s AND date_jour = %s AND heure_depart IS NOT NULL
         ''', (heure_actuelle, matricule, date_aujourdhui))
         
         if cursor.rowcount == 0:
+            # Sous-requête modifiée pour la compatibilité stricte de mise à jour MySQL
             cursor.execute('''
                 UPDATE pointages 
-                SET heure_depart = ? 
+                SET heure_depart = %s 
                 WHERE id = (
-                    SELECT id FROM pointages 
-                    WHERE matricule_employe = ? AND heure_depart IS NULL 
-                    ORDER BY id DESC LIMIT 1
+                    SELECT id FROM (
+                        SELECT id FROM pointages 
+                        WHERE matricule_employe = %s AND heure_depart IS NULL 
+                        ORDER BY id DESC LIMIT 1
+                    ) as t
                 )
             ''', (heure_actuelle, matricule))
             
     conn.commit()
+    cursor.close()
     conn.close()
     return "<h3>Pointage réussi ! Merci.</h3><br><a href='/pointage'>Retour</a>"
 

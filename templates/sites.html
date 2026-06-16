@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestion des Sites - Suivi Nettoyage</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 30px; background-color: #f4f6f9; color: #333; }
+        .container { max-width: 1000px; margin: auto; }
+        h1 { color: #2c3e50; border-bottom: 3px solid #e67e22; padding-bottom: 10px; }
+        .btn-back { display: inline-block; padding: 10px 15px; background-color: #34495e; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; margin-bottom: 20px; }
+        .box { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 30px; border-top: 4px solid #e67e22; }
+        .form-group { margin-bottom: 12px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input { width: 100%; padding: 10px; border-radius: 5px; border: 1px solid #ccc; box-sizing: border-box; }
+        button { background-color: #e67e22; color: white; font-weight: bold; border: none; cursor: pointer; padding: 10px 20px; border-radius: 5px; margin-top: 10px; width: 100%; }
+        table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; vertical-align: middle; }
+        th { background-color: #34495e; color: white; }
+        .badge { padding: 4px 8px; border-radius: 12px; font-size: 0.85rem; font-weight: bold; color: white; }
+        .badge.green { background-color: #2ecc71; }
+        .badge.orange { background-color: #e67e22; }
+        .btn-action { display: inline-block; padding: 6px 12px; border-radius: 4px; text-decoration: none; font-size: 0.85rem; font-weight: bold; color: white; border: none; cursor: pointer; }
+        .btn-warning { background-color: #f39c12; }
+        .btn-warning:hover { background-color: #d35400; }
+        .btn-danger { background-color: #e74c3c; }
+        .btn-danger:hover { background-color: #c0392b; }
+        .text-end { text-align: right; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <a href="/" class="btn-back">⬅️ Retour au Bureau Principal</a>
+
+    <h1>🏢 Gestion des Sites Clients (Chantiers)</h1>
+    <br>
+
+    <div class="box">
+        <h3>➕ Ajouter un nouveau Site</h3>
+        <form action="/ajouter_site" method="POST">
+            <div class="form-group">
+                <label>Nom du Site :</label>
+                <input type="text" name="nom_site" placeholder="Ex: Banque Centrale de Mauritanie" required>
+            </div>
+            <div class="form-group">
+                <label>Adresse / Zone :</label>
+                <input type="text" name="adresse_site" placeholder="Ex: Tevragh Zeina, Nouakchott" required>
+            </div>
+            <button type="submit">Créer le Site</button>
+        </form>
+    </div>
+
+    <h2>Liste Active des Chantiers</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Nom du Site</th>
+                <th>Localisation</th>
+                <th>Statut Terrain</th>
+                <th class="text-end" style="padding-right: 25px;">Actions de Gestion</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in sites %}
+            <tr>
+                <td><strong>{{ s[1] }}</strong></td>
+                <td>📍 {{ s[2] if s[2] else 'Non spécifiée' }}</td>
+                <td>
+                    <span class="badge {% if s[3] and s[3]>0 %}green{% else %}orange{% endif %}">
+                        {{ s[3] if s[3] else 0 }} présents
+                    </span>
+                </td>
+                <td class="text-end">
+                    <a href="/modifier_site/{{ s[0] }}" class="btn-action btn-warning" style="margin-right: 5px;">Modifier</a>
+                    
+                    <form action="/supprimer_site/{{ s[0] }}" method="POST" style="display:inline;" onsubmit="return confirm('Attention : Confirmez-vous la rupture de contrat et la suppression définitive de ce site ?');">
+                        <button type="submit" class="btn-action btn-danger" style="width:auto; margin-top:0;">Supprimer</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+</body>
+</html>
