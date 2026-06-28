@@ -68,6 +68,14 @@ def init_db():
             FOREIGN KEY(matricule_employe) REFERENCES employes(matricule) ON DELETE CASCADE,
             FOREIGN KEY(id_site) REFERENCES sites(id) ON DELETE CASCADE
         )''')
+        
+        # Sûreté : Ajout dynamique des colonnes de géolocalisation sur Render si manquantes
+        try:
+            cursor.execute("ALTER TABLE pointages ADD COLUMN IF NOT EXISTS latitude REAL;")
+            cursor.execute("ALTER TABLE pointages ADD COLUMN IF NOT EXISTS longitude REAL;")
+        except Exception as e:
+            print(f"Note: Vérification ou ajout des colonnes GPS : {e}")
+
     else:
         # Syntaxe MySQL pour ton Chromebook
         cursor.execute('''CREATE TABLE IF NOT EXISTS sites (
@@ -96,6 +104,13 @@ def init_db():
             FOREIGN KEY(matricule_employe) REFERENCES employes(matricule) ON DELETE CASCADE,
             FOREIGN KEY(id_site) REFERENCES sites(id) ON DELETE CASCADE
         )''')
+        
+        # Sûreté : Idem en local sur MariaDB/MySQL
+        try:
+            cursor.execute("ALTER TABLE pointages ADD COLUMN latitude REAL NULL;")
+            cursor.execute("ALTER TABLE pointages ADD COLUMN longitude REAL NULL;")
+        except Exception:
+            pass
         
     conn.commit()
     cursor.close()
@@ -155,7 +170,7 @@ def dashboard():
     cursor.execute("SELECT matricule, nom, prenom FROM employes WHERE statut = 'En congé'")
     employes_en_conge = cursor.fetchall()
     
-    # 5. Historique général des pointages du jour (avec coordonnées GPS)
+    # 5. Historique général des pointages du jour (avec coordonnées GPS récupérées)
     cursor.execute('''
         SELECT p.id, e.prenom, e.nom, s.nom, p.date_jour, p.heure_arrivee, p.heure_depart, p.latitude, p.longitude 
         FROM pointages p
@@ -400,22 +415,18 @@ def executer_pointage():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # ATTENTION À L'ALIGNEMENT ICI : 4 espaces pour le "if"
     if action == 'arrivee':
-        # 8 espaces pour le contenu du "if"
         cursor.execute('''
             INSERT INTO pointages (matricule_employe, id_site, date_jour, heure_arrivee, latitude, longitude)
             VALUES (%s, %s, %s, %s, %s, %s)
         ''', (matricule, int(site_id), date_aujourdhui, heure_actuelle, lat, lng))
 
     elif action == 'depart':
-        # Le reste de ton code existant pour le départ...
         cursor.execute('''
             UPDATE pointages 
             SET heure_depart = %s 
-            WHERE matricule_employe = %s AND date_jour = %s AND heure_depart IS NOT NULL
+            WHERE matricule_employe = %s AND date_jour = %s AND heure_depart IS NULL
         ''', (heure_actuelle, matricule, date_aujourdhui))
-        # ... (conserve la suite de ton code actuel pour le départ)
         
         if cursor.rowcount == 0:
             if IS_RENDER:
