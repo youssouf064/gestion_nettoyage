@@ -1,3 +1,6 @@
+import csv
+import io
+from flask import Response
 import os
 from datetime import datetime
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session
@@ -152,9 +155,9 @@ def dashboard():
     cursor.execute("SELECT matricule, nom, prenom FROM employes WHERE statut = 'En congé'")
     employes_en_conge = cursor.fetchall()
     
-    # 5. Historique général des pointages du jour
+    # 5. Historique général des pointages du jour (avec coordonnées GPS)
     cursor.execute('''
-        SELECT p.id, e.prenom, e.nom, s.nom, p.date_jour, p.heure_arrivee, p.heure_depart 
+        SELECT p.id, e.prenom, e.nom, s.nom, p.date_jour, p.heure_arrivee, p.heure_depart, p.latitude, p.longitude 
         FROM pointages p
         JOIN employes e ON p.matricule_employe = e.matricule
         JOIN sites s ON p.id_site = s.id
@@ -271,6 +274,50 @@ def rapport_paie():
     conn.close()
     return render_template('paie.html', bilan=bilan_paie)
 
+@app.route('/exporter_paie_csv')
+def exporter_paie_csv():
+    if not session.get('est_admin'):
+        return redirect(url_for('espace_pointage'))
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT matricule, nom, prenom, salaire_base FROM employes")
+    liste_employes = cursor.fetchall()
+    
+    # Préparation du fichier CSV en mémoire
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=';') # Point-virgule idéal pour Excel France/Afrique
+    
+    # En-tête du tableau Excel
+    writer.writerow(['Matricule', 'Employe', 'Total Heures', 'Taux Horaire (MRU/h)', 'Salaire a Verser (MRU)'])
+    
+    # Reprise exacte des calculs de ta fonction /paie
+    for emp in liste_employes:
+        matricule, nom, prenom, salaire_base = emp
+        cursor.execute('SELECT heure_arrivee, heure_depart FROM pointages WHERE matricule_employe = %s AND heure_depart IS NOT NULL', (matricule,))
+        pointages = cursor.fetchall()
+        
+        total_heures = 0.0
+        for p in pointages:
+            total_heures += calculer_heures(p[0], p[1])
+            
+        taux_horaire = round(salaire_base / 160, 2)
+        salaire_gagne = round(total_heures * taux_horaire, 2)
+        
+        # On écrit la ligne de l'employé dans le fichier
+        nom_complet = f"{prenom} {nom}"
+        writer.writerow([matricule, nom_complet, f"{total_heures} h", f"{taux_horaire} MRU", f"{salaire_gagne} MRU"])
+        
+    cursor.close()
+    conn.close()
+    
+    # Envoi du fichier au navigateur pour déclencher le téléchargement automatique
+    output.seek(0)
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-disposition": "attachment; filename=Rapport_Paie_Nettoyage.csv"}
+    )
 
 @app.route('/supprimer_site/<int:id>', methods=['POST'])
 def supprimer_site(id):
@@ -353,17 +400,22 @@ def executer_pointage():
     conn = get_db_connection()
     cursor = conn.cursor()
     
+    # ATTENTION À L'ALIGNEMENT ICI : 4 espaces pour le "if"
     if action == 'arrivee':
+        # 8 espaces pour le contenu du "if"
         cursor.execute('''
-            INSERT INTO pointages (matricule_employe, id_site, date_jour, heure_arrivee)
-            VALUES (%s, %s, %s, %s)
-        ''', (matricule, int(site_id), date_aujourdhui, heure_actuelle))
+            INSERT INTO pointages (matricule_employe, id_site, date_jour, heure_arrivee, latitude, longitude)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        ''', (matricule, int(site_id), date_aujourdhui, heure_actuelle, lat, lng))
+
     elif action == 'depart':
+        # Le reste de ton code existant pour le départ...
         cursor.execute('''
             UPDATE pointages 
             SET heure_depart = %s 
             WHERE matricule_employe = %s AND date_jour = %s AND heure_depart IS NOT NULL
         ''', (heure_actuelle, matricule, date_aujourdhui))
+        # ... (conserve la suite de ton code actuel pour le départ)
         
         if cursor.rowcount == 0:
             if IS_RENDER:

@@ -32,6 +32,8 @@
         .btn-danger { background-color: #e74c3c; }
         .btn-danger:hover { background-color: #c0392b; }
         .text-end { text-align: right; }
+        .btn-maps { background-color: #3498db; color: white; padding: 5px 10px; text-decoration: none; border-radius: 4px; font-size: 0.85rem; font-weight: bold; display: inline-block; }
+        .btn-maps:hover { background-color: #2980b9; }
     </style>
 </head>
 <body>
@@ -143,6 +145,46 @@
                     <form action="/supprimer_employe/{{ e[0] }}" method="POST" onsubmit="return confirm('Supprimer définitivement cet employé ?');">
                         <button type="submit" style="background-color:#e74c3c; margin:0; padding:5px 10px; font-size:0.8rem; width:auto;">🗑️ Licencier / Retirer</button>
                     </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2>🕒 Historique Général des Pointages du Jour</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Employé</th>
+                <th>Site Pointé</th>
+                <th>Date</th>
+                <th>Arrivée</th>
+                <th>Départ</th>
+                <th>Position GPS</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in pointages %}
+            <tr>
+                <td><strong>{{ p[1] }} {{ p[2] }}</strong></td>
+                <td>🏢 {{ p[3] }}</td>
+                <td>📅 {{ p[4] }}</td>
+                <td><span class="badge green">📥 {{ p[5] }}</span></td>
+                <td>
+                    {% if p[6] %}
+                        <span class="badge orange">📤 {{ p[6] }}</span>
+                    {% else %}
+                        <span style="color:#7f8c8d; font-style:italic;">En cours...</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if p[7] and p[8] %}
+                        <a href="https://www.google.com/maps?q={{ p[7] }},{{ p[8] }}" target="_blank" class="btn-maps">
+                            🗺️ Voir sur Maps
+                        </a>
+                    {% else %}
+                        <span style="color: #95a5a6; font-style: italic;">Non géolocalisé</span>
+                    {% endif %}
                 </td>
             </tr>
             {% endfor %}

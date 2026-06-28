@@ -11,14 +11,23 @@
         table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-top: 20px; }
         th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #ddd; }
         th { background-color: #2980b9; color: white; }
-        .btn-back { display: inline-block; margin-bottom: 20px; padding: 10px 15px; background-color: #7f8c8d; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; }
+        
+        /* Conteneur pour aligner les boutons proprement */
+        .action-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .btn-back { padding: 10px 15px; background-color: #7f8c8d; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; }
+        .btn-export { padding: 10px 15px; background-color: #27ae60; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; margin-left: 10px; display: inline-block; }
         .total-money { font-weight: bold; color: #27ae60; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <a href="/" class="btn-back">⬅️ Retour au Tableau de Bord</a>
+    <!-- Barre de boutons d'action -->
+    <div class="action-bar">
+        <a href="/" class="btn-back">⬅️ Retour au Tableau de Bord</a>
+        <a href="/exporter_paie_csv" class="btn-export">📊 Exporter Excel (.csv)</a>
+    </div>
+
     <h1>Rapport de Paie et Heures Travaillées</h1>
     
     <table>
