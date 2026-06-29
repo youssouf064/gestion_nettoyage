@@ -398,7 +398,6 @@ def espace_pointage():
     conn.close()
     return render_template('pointage.html', employes=liste_employes, sites=liste_sites)
 
-
 @app.route('/executer_pointage', methods=['POST'])
 def executer_pointage():
     matricule = request.form.get('matricule')
@@ -406,6 +405,10 @@ def executer_pointage():
     action = request.form.get('action')
     lat = request.form.get('latitude')
     lng = request.form.get('longitude')
+
+    # Convertir en None si les coordonnées sont vides
+    if not lat or lat.strip() == "": lat = None
+    if not lng or lng.strip() == "": lng = None
 
     print(f"Pointage reçu pour {matricule} au site {site_id}. Action: {action}. GPS: {lat}, {lng}")
     
@@ -415,44 +418,58 @@ def executer_pointage():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    if action == 'arrivee':
-        cursor.execute('''
-            INSERT INTO pointages (matricule_employe, id_site, date_jour, heure_arrivee, latitude, longitude)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        ''', (matricule, int(site_id), date_aujourdhui, heure_actuelle, lat, lng))
+    try:
+        if action == 'arrivee':
+            # Enregistrement de l'arrivée avec la position GPS
+            cursor.execute('''
+                INSERT INTO pointages (matricule_employe, id_site, date_jour, heure_arrivee, latitude, longitude)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            ''', (matricule, int(site_id), date_aujourdhui, heure_actuelle, lat, lng))
 
-    elif action == 'depart':
-        cursor.execute('''
-            UPDATE pointages 
-            SET heure_depart = %s 
-            WHERE matricule_employe = %s AND date_jour = %s AND heure_depart IS NULL
-        ''', (heure_actuelle, matricule, date_aujourdhui))
-        
-        if cursor.rowcount == 0:
-            if IS_RENDER:
-                cursor.execute('''
-                    UPDATE pointages 
-                    SET heure_depart = %s 
-                    WHERE matricule_employe = %s AND heure_depart IS NULL
-                ''', (heure_actuelle, matricule))
-            else:
-                cursor.execute('''
-                    UPDATE pointages 
-                    SET heure_depart = %s 
-                    WHERE id = (
-                        SELECT id FROM (
+        elif action == 'depart':
+            # CORRECTION : On cherche le pointage du jour où l'heure de départ est encore VIDE (NULL)
+            cursor.execute('''
+                UPDATE pointages 
+                SET heure_depart = %s 
+                WHERE matricule_employe = %s AND date_jour = %s AND heure_depart IS NULL
+            ''', (heure_actuelle, matricule, date_aujourdhui))
+            
+            # Si aucun pointage correspondant n'a été trouvé pour aujourd'hui, on cherche le dernier pointage ouvert
+            if cursor.rowcount == 0:
+                if IS_RENDER:
+                    cursor.execute('''
+                        UPDATE pointages 
+                        SET heure_depart = %s 
+                        WHERE id = (
                             SELECT id FROM pointages 
                             WHERE matricule_employe = %s AND heure_depart IS NULL 
                             ORDER BY id DESC LIMIT 1
-                        ) as t
-                    )
-                ''', (heure_actuelle, matricule))
-            
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return "<h3>Pointage réussi ! Merci.</h3><br><a href='/pointage'>Retour</a>"
-
+                        )
+                    ''', (heure_actuelle, matricule))
+                else:
+                    cursor.execute('''
+                        UPDATE pointages 
+                        SET heure_depart = %s 
+                        WHERE id = (
+                            SELECT id FROM (
+                                SELECT id FROM pointages 
+                                WHERE matricule_employe = %s AND heure_depart IS NULL 
+                                ORDER BY id DESC LIMIT 1
+                            ) as t
+                        )
+                    ''', (heure_actuelle, matricule))
+                
+        conn.commit()
+        message = "<h3>Pointage réussi ! Merci.</h3>"
+    except Exception as e:
+        conn.rollback()
+        print(f"Erreur lors du pointage : {e}")
+        message = f"<h3>Une erreur est survenue lors de l'enregistrement.</h3><p>{e}</p>"
+    finally:
+        cursor.close()
+        conn.close()
+        
+    return f"{message}<br><a href='/pointage'>Retour</a>"
 
 def calculer_heures(arrivee, depart):
     if not arrivee or not depart:
