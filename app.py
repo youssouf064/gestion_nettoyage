@@ -242,6 +242,67 @@ def ajouter_employe():
     return redirect(url_for('dashboard'))
 
 
+# --- NOUVELLE ROUTE : IMPORTATION DE FICHIER CSV (EXCEL) ---
+@app.route('/importer_employes_csv', methods=['POST'])
+def importer_employes_csv():
+    if not session.get('est_admin'):
+        return redirect(url_for('espace_pointage'))
+
+    file = request.files.get('file_excel')
+    if not file or file.filename == '':
+        return f"<h3>Aucun fichier sélectionné.</h3><br><a href='/'>Retour</a>"
+
+    try:
+        # Lire le fichier à la volée en mémoire textuelle UTF-8
+        stream = io.StringIO(file.stream.read().decode("utf-8"), newline=None)
+        # Utilisation du séparateur ';' classique des exports Excel francophones
+        reader = csv.DictReader(stream, delimiter=';')
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        nb_importes = 0
+
+        for row in reader:
+            # Récupération et nettoyage des données de la ligne
+            matricule = row.get('matricule', '').upper().strip()
+            nom = row.get('nom', '').strip()
+            prenom = row.get('prenom', '').strip()
+            salaire = row.get('salaire', '0')
+            statut = row.get('statut', 'Actif').strip()
+            site_id = row.get('site_id')
+
+            if not matricule or not nom or not prenom:
+                continue  # Passe les lignes incomplètes
+
+            # Vérifier si le matricule existe déjà
+            cursor.execute("SELECT matricule FROM employes WHERE matricule = %s", (matricule,))
+            if cursor.fetchone():
+                continue  # Évite les doublons de clés primaires
+
+            # Conversion propre de l'ID du site (gestion du NULL)
+            try:
+                id_site = int(site_id) if site_id and str(site_id).strip() != '' else None
+            except ValueError:
+                id_site = None
+
+            # Insertion directe
+            cursor.execute('''
+                INSERT INTO employes (matricule, nom, prenom, salaire_base, statut, id_site_affecte)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            ''', (matricule, nom, prenom, float(salaire), statut, id_site))
+            nb_importes += 1
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return f"<h3>Succès : {nb_importes} employé(s) enregistré(s) avec succès !</h3><br><a href='/'>Retour au tableau de bord</a>"
+
+    except Exception as e:
+        print(f"Erreur lors de l'import CSV : {e}")
+        return f"<h3>Une erreur est survenue lors du traitement du fichier.</h3><p>{e}</p><br><a href='/'>Retour</a>"
+
+
 @app.route('/supprimer_employe/<matricule>', methods=['POST'])
 def supprimer_employe(matricule):
     if not session.get('est_admin'):
