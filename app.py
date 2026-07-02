@@ -145,7 +145,7 @@ def dashboard():
     cursor.execute("SELECT COUNT(*) FROM employes WHERE statut = 'En congé'")
     total_conges = cursor.fetchone()[0]
     
-    # 2. Liste des sites avec nombre de présents (Correction stricte du type pour PostgreSQL vs MySQL)
+    # 2. Liste des sites avec nombre de présents et effectif total affecté
     if IS_RENDER:
         fonction_date = "CURRENT_DATE::text"
     else:
@@ -153,7 +153,8 @@ def dashboard():
 
     cursor.execute(f'''
         SELECT s.id, s.nom, s.adresse,
-        (SELECT COUNT(*) FROM pointages p WHERE p.id_site = s.id AND p.date_jour = {fonction_date} AND p.heure_depart IS NULL) as presents
+        (SELECT COUNT(*) FROM pointages p WHERE p.id_site = s.id AND p.date_jour = {fonction_date} AND p.heure_depart IS NULL) as presents,
+        (SELECT COUNT(*) FROM employes e WHERE e.id_site_affecte = s.id) as total_employes
         FROM sites s
     ''')
     liste_sites = cursor.fetchall()

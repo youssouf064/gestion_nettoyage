@@ -107,7 +107,7 @@
             <tr>
                 <th>Nom du Site</th>
                 <th>Localisation</th>
-                <th>Employés présents</th>
+                <th>Employés présents / Total affectés</th>
                 <th class="text-end" style="padding-right: 25px;">Actions</th>
             </tr>
         </thead>
@@ -118,7 +118,10 @@
                 <td>📍 {{ s[2] if s[2] else 'Non spécifiée' }}</td>
                 <td>
                     <span class="badge {% if s[3]>0 %}green{% else %}orange{% endif %}">
-                        {{ s[3] }} présents
+                        {{ s[3] }} présent(s)
+                    </span>
+                    <span style="font-size: 0.9rem; color: #555; margin-left: 5px; font-weight: 500;">
+                        / {{ s[4] }} inscrit(s)
                     </span>
                 </td>
                 <td class="text-end">
