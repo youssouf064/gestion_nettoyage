@@ -1,5 +1,5 @@
-import csv
 import io
+import csv
 from flask import Response
 import os
 from datetime import datetime
@@ -242,7 +242,7 @@ def ajouter_employe():
     return redirect(url_for('dashboard'))
 
 
-# --- NOUVELLE ROUTE : IMPORTATION DE FICHIER CSV (EXCEL) ---
+# --- IMPORTATION SECURISEE ET ULTRA-ROBUSTE ---
 @app.route('/importer_employes_csv', methods=['POST'])
 def importer_employes_csv():
     if not session.get('est_admin'):
@@ -253,53 +253,93 @@ def importer_employes_csv():
         return f"<h3>Aucun fichier sélectionné.</h3><br><a href='/'>Retour</a>"
 
     try:
-        # Lire le fichier à la volée en mémoire textuelle UTF-8
-        stream = io.StringIO(file.stream.read().decode("utf-8"), newline=None)
-        # Utilisation du séparateur ';' classique des exports Excel francophones
-        reader = csv.DictReader(stream, delimiter=';')
+        # Gère l'encodage Excel standard et supprime les caractères invisibles (BOM UTF-8)
+        content = file.stream.read().decode("utf-8-sig")
+        stream = io.StringIO(content, newline=None)
+        
+        # Détection automatique du séparateur (virgule ou point-virgule)
+        premiere_ligne = content.split('\n')[0] if content else ''
+        separateur = ';' if ';' in premiere_ligne else ','
+        
+        reader = csv.DictReader(stream, delimiter=separateur)
+
+        # Nettoyage des espaces et passage en minuscules pour s'adapter à toutes les saisies
+        reader.fieldnames = [name.strip().lower() for name in reader.fieldnames] if reader.fieldnames else []
+
+        print(f"--- DEBUT IMPORT --- Separateur detecte: '{separateur}'")
+        print(f"Colonnes detectees dans le fichier : {reader.fieldnames}")
 
         conn = get_db_connection()
         cursor = conn.cursor()
         nb_importes = 0
+        lignes_traitees = 0
 
         for row in reader:
-            # Récupération et nettoyage des données de la ligne
-            matricule = row.get('matricule', '').upper().strip()
-            nom = row.get('nom', '').strip()
-            prenom = row.get('prenom', '').strip()
-            salaire = row.get('salaire', '0')
-            statut = row.get('statut', 'Actif').strip()
-            site_id = row.get('site_id')
+            lignes_traitees += 1
+            
+            # Récupération ultra flexible avec alternatives de noms de colonnes
+            matricule = (row.get('matricule') or row.get('matricules') or '').upper().strip()
+            nom = (row.get('nom') or row.get('noms') or '').strip()
+            prenom = (row.get('prenom') or row.get('prenoms') or '').strip()
+            salaire = (row.get('salaire') or row.get('salaire_base') or '0').strip()
+            statut = (row.get('statut') or 'Actif').strip()
+            nom_site = (row.get('site_id') or row.get('site') or row.get('affectation') or '').strip()
+
+            print(f"Ligne {lignes_traitees} -> Matricule: '{matricule}', Nom: '{nom}', Prenom: '{prenom}'")
 
             if not matricule or not nom or not prenom:
-                continue  # Passe les lignes incomplètes
+                continue 
 
-            # Vérifier si le matricule existe déjà
+            # Éviter les doublons de clés primaires
             cursor.execute("SELECT matricule FROM employes WHERE matricule = %s", (matricule,))
             if cursor.fetchone():
-                continue  # Évite les doublons de clés primaires
+                continue  
 
-            # Conversion propre de l'ID du site (gestion du NULL)
+            id_site = None
+            if nom_site:
+                cursor.execute("SELECT id FROM sites WHERE LOWER(nom) = %s", (nom_site.lower(),))
+                result_site = cursor.fetchone()
+                
+                if result_site:
+                    id_site = result_site[0]
+                else:
+                    cursor.execute("INSERT INTO sites (nom, adresse) VALUES (%s, %s)", (nom_site, "Créé via import automatique"))
+                    if IS_RENDER:
+                        cursor.execute("SELECT LASTVAL()")
+                    else:
+                        cursor.execute("SELECT LAST_INSERT_ID()")
+                    id_site = cursor.fetchone()[0]
+
             try:
-                id_site = int(site_id) if site_id and str(site_id).strip() != '' else None
+                # Gère les salaires écrits avec des virgules à la française/francophone
+                salaire_flt = float(salaire.replace(',', '.'))
             except ValueError:
-                id_site = None
+                salaire_flt = 0.0
 
-            # Insertion directe
             cursor.execute('''
                 INSERT INTO employes (matricule, nom, prenom, salaire_base, statut, id_site_affecte)
                 VALUES (%s, %s, %s, %s, %s, %s)
-            ''', (matricule, nom, prenom, float(salaire), statut, id_site))
+            ''', (matricule, nom, prenom, salaire_flt, statut.capitalize(), id_site))
             nb_importes += 1
 
         conn.commit()
         cursor.close()
         conn.close()
         
+        print(f"--- FIN IMPORT --- Lignes lues : {lignes_traitees} | Enregistrees : {nb_importes}")
+        
+        if nb_importes == 0:
+            return f"""
+            <h3>Succès : 0 employé enregistré.</h3>
+            <p><b>Pourquoi ?</b> Le fichier contient {lignes_traitees} lignes, mais aucune n'a pu être insérée (Champs obligatoires manquants ou matricules déjà existants).</p>
+            <p>Vérifie que tes colonnes contiennent bien : <code>matricule</code>, <code>nom</code>, et <code>prenom</code>.</p>
+            <br><a href='/'>Retour au tableau de bord</a>
+            """
+        
         return f"<h3>Succès : {nb_importes} employé(s) enregistré(s) avec succès !</h3><br><a href='/'>Retour au tableau de bord</a>"
 
     except Exception as e:
-        print(f"Erreur lors de l'import CSV : {e}")
+        print(f"Erreur critique lors de l'import CSV : {e}")
         return f"<h3>Une erreur est survenue lors du traitement du fichier.</h3><p>{e}</p><br><a href='/'>Retour</a>"
 
 
@@ -362,12 +402,11 @@ def exporter_paie_csv():
     
     # Préparation du fichier CSV en mémoire
     output = io.StringIO()
-    writer = csv.writer(output, delimiter=';') # Point-virgule idéal pour Excel France/Afrique
+    writer = csv.writer(output, delimiter=';') 
     
     # En-tête du tableau Excel
     writer.writerow(['Matricule', 'Employe', 'Total Heures', 'Taux Horaire (MRU/h)', 'Salaire a Verser (MRU)'])
     
-    # Reprise exacte des calculs de ta fonction /paie
     for emp in liste_employes:
         matricule, nom, prenom, salaire_base = emp
         cursor.execute('SELECT heure_arrivee, heure_depart FROM pointages WHERE matricule_employe = %s AND heure_depart IS NOT NULL', (matricule,))
@@ -380,14 +419,12 @@ def exporter_paie_csv():
         taux_horaire = round(salaire_base / 160, 2)
         salaire_gagne = round(total_heures * taux_horaire, 2)
         
-        # On écrit la ligne de l'employé dans le fichier
         nom_complet = f"{prenom} {nom}"
         writer.writerow([matricule, nom_complet, f"{total_heures} h", f"{taux_horaire} MRU", f"{salaire_gagne} MRU"])
         
     cursor.close()
     conn.close()
     
-    # Envoi du fichier au navigateur pour déclencher le téléchargement automatique
     output.seek(0)
     return Response(
         output.getvalue(),
@@ -467,7 +504,6 @@ def executer_pointage():
     lat = request.form.get('latitude')
     lng = request.form.get('longitude')
 
-    # Convertir en None si les coordonnées sont vides
     if not lat or lat.strip() == "": lat = None
     if not lng or lng.strip() == "": lng = None
 
@@ -481,21 +517,18 @@ def executer_pointage():
     
     try:
         if action == 'arrivee':
-            # Enregistrement de l'arrivée avec la position GPS
             cursor.execute('''
                 INSERT INTO pointages (matricule_employe, id_site, date_jour, heure_arrivee, latitude, longitude)
                 VALUES (%s, %s, %s, %s, %s, %s)
             ''', (matricule, int(site_id), date_aujourdhui, heure_actuelle, lat, lng))
 
         elif action == 'depart':
-            # CORRECTION : On cherche le pointage du jour où l'heure de départ est encore VIDE (NULL)
             cursor.execute('''
                 UPDATE pointages 
                 SET heure_depart = %s 
                 WHERE matricule_employe = %s AND date_jour = %s AND heure_depart IS NULL
             ''', (heure_actuelle, matricule, date_aujourdhui))
             
-            # Si aucun pointage correspondant n'a été trouvé pour aujourd'hui, on cherche le dernier pointage ouvert
             if cursor.rowcount == 0:
                 if IS_RENDER:
                     cursor.execute('''
