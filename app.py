@@ -1,9 +1,13 @@
 import io
 import csv
-from flask import Response
 import os
 from datetime import datetime
-from flask import Flask, render_template, request, redirect, url_for, jsonify, session
+import openpyxl
+import pdfplumber
+from pypdf import PdfReader
+import docx
+import pandas as pd
+from flask import Flask, render_template, request, redirect, url_for, jsonify, session, Response
 
 app = Flask(__name__)
 app.secret_key = "cle_secrete_super_securisee_youssouf"
@@ -22,26 +26,22 @@ else:
     import mysql.connector
     DB_CONFIG_LOCAL = {
         'host': 'localhost',
-        'user': 'root',
-        'password': 'root',
+        'user': 'nettoyage_user',
+        'password': 'MonMotDePasseSecurise123!',
         'database': 'gestion_nettoyage'
     }
 
 def get_db_connection():
     if IS_RENDER:
-        # Connexion PostgreSQL pour Neon (Render)
         return psycopg2.connect(DATABASE_URL)
     else:
-        # Connexion MySQL pour le Chromebook
         return mysql.connector.connect(**DB_CONFIG_LOCAL)
 
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Adaptations de requêtes selon la base de données détectée
     if IS_RENDER:
-        # Syntaxe PostgreSQL pour Neon
         cursor.execute('''CREATE TABLE IF NOT EXISTS sites (
             id SERIAL PRIMARY KEY, 
             nom VARCHAR(255) NOT NULL, 
@@ -69,7 +69,6 @@ def init_db():
             FOREIGN KEY(id_site) REFERENCES sites(id) ON DELETE CASCADE
         )''')
         
-        # Sûreté : Ajout dynamique des colonnes de géolocalisation sur Render si manquantes
         try:
             cursor.execute("ALTER TABLE pointages ADD COLUMN IF NOT EXISTS latitude REAL;")
             cursor.execute("ALTER TABLE pointages ADD COLUMN IF NOT EXISTS longitude REAL;")
@@ -77,7 +76,6 @@ def init_db():
             print(f"Note: Vérification ou ajout des colonnes GPS : {e}")
 
     else:
-        # Syntaxe MySQL pour ton Chromebook
         cursor.execute('''CREATE TABLE IF NOT EXISTS sites (
             id INT AUTO_INCREMENT PRIMARY KEY, 
             nom VARCHAR(255) NOT NULL, 
@@ -105,7 +103,6 @@ def init_db():
             FOREIGN KEY(id_site) REFERENCES sites(id) ON DELETE CASCADE
         )''')
         
-        # Sûreté : Idem en local sur MariaDB/MySQL
         try:
             cursor.execute("ALTER TABLE pointages ADD COLUMN latitude REAL NULL;")
             cursor.execute("ALTER TABLE pointages ADD COLUMN longitude REAL NULL;")
@@ -116,10 +113,8 @@ def init_db():
     cursor.close()
     conn.close()
 
-# Lance l'initialisation au démarrage
 init_db()
 
-# Le code secret que seule la direction doit connaître
 CODE_SECRET_ADMIN = "1234"
 
 # --- ACCÈS ET CONTRÔLE DU BUREAU PRINCIPAL ---
@@ -139,13 +134,11 @@ def dashboard():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # 1. Statistiques Globales
     cursor.execute("SELECT COUNT(*) FROM employes WHERE statut = 'Actif'")
     total_actifs = cursor.fetchone()[0]
     cursor.execute("SELECT COUNT(*) FROM employes WHERE statut = 'En congé'")
     total_conges = cursor.fetchone()[0]
     
-    # 2. Liste des sites avec nombre de présents et effectif total affecté
     if IS_RENDER:
         fonction_date = "CURRENT_DATE::text"
     else:
@@ -159,7 +152,6 @@ def dashboard():
     ''')
     liste_sites = cursor.fetchall()
     
-    # 3. Liste complète des employés
     cursor.execute('''
         SELECT e.matricule, e.nom, e.prenom, e.salaire_base, e.statut, s.nom 
         FROM employes e
@@ -167,11 +159,9 @@ def dashboard():
     ''')
     liste_employes = cursor.fetchall()
     
-    # 4. Liste des personnes en congé spécifiquement
     cursor.execute("SELECT matricule, nom, prenom FROM employes WHERE statut = 'En congé'")
     employes_en_conge = cursor.fetchall()
     
-    # 5. Historique général des pointages du jour (avec coordonnées GPS récupérées)
     cursor.execute('''
         SELECT p.id, e.prenom, e.nom, s.nom, p.date_jour, p.heure_arrivee, p.heure_depart, p.latitude, p.longitude 
         FROM pointages p
@@ -243,7 +233,7 @@ def ajouter_employe():
     return redirect(url_for('dashboard'))
 
 
-# --- IMPORTATION SECURISEE ET ULTRA-ROBUSTE ---
+# --- IMPORTATION MULTI-FORMAT HYBRIDE ET ULTRA-ROBUSTE ---
 @app.route('/importer_employes_csv', methods=['POST'])
 def importer_employes_csv():
     if not session.get('est_admin'):
@@ -253,58 +243,91 @@ def importer_employes_csv():
     if not file or file.filename == '':
         return f"<h3>Aucun fichier sélectionné.</h3><br><a href='/'>Retour</a>"
 
+    filename = file.filename.lower()
+    lignes_donnees = []
+
     try:
-        # Gère l'encodage Excel standard et supprime les caractères invisibles (BOM UTF-8)
-        content = file.stream.read().decode("utf-8-sig")
-        stream = io.StringIO(content, newline=None)
-        
-        # Détection automatique du séparateur (virgule ou point-virgule)
-        premiere_ligne = content.split('\n')[0] if content else ''
-        separateur = ';' if ';' in premiere_ligne else ','
-        
-        reader = csv.DictReader(stream, delimiter=separateur)
+        # 1. TENTATIVE LECTURE EXCEL / CSV ROBUSTE AVEC PANDAS
+        if filename.endswith(('.xlsx', '.xls', '.csv')):
+            try:
+                if filename.endswith('.csv'):
+                    df = pd.read_csv(file, sep=None, engine='python', dtype=str)
+                else:
+                    df = pd.read_excel(file, dtype=str)
+                
+                df = df.fillna('')
+                lignes_donnees = [df.columns.astype(str).tolist()] + df.values.tolist()
+            except Exception:
+                # Si le fichier .xlsx est en fait un CSV renommé
+                file.seek(0)
+                content = file.stream.read().decode("utf-8-sig", errors='ignore')
+                stream = io.StringIO(content)
+                separateur = ';' if ';' in content.split('\n')[0] else ','
+                reader = csv.reader(stream, delimiter=separateur)
+                lignes_donnees = list(reader)
 
-        # Nettoyage des espaces et passage en minuscules pour s'adapter à toutes les saisies
-        reader.fieldnames = [name.strip().lower() for name in reader.fieldnames] if reader.fieldnames else []
+        # 2. TRAITEMENT WORD (.docx)
+        elif filename.endswith('.docx'):
+            doc = docx.Document(file)
+            for table in doc.tables:
+                for row in table.rows:
+                    cells = [cell.text.strip() for cell in row.cells]
+                    if any(cells):
+                        lignes_donnees.append(cells)
 
-        print(f"--- DEBUT IMPORT --- Separateur detecte: '{separateur}'")
-        print(f"Colonnes detectees dans le fichier : {reader.fieldnames}")
+        # 3. TRAITEMENT PDF (.pdf)
+        elif filename.endswith('.pdf'):
+            with pdfplumber.open(file) as pdf:
+                for page in pdf.pages:
+                    tables = page.extract_tables()
+                    for table in tables:
+                        for row in table:
+                            if any(row):
+                                lignes_donnees.append([str(cell or '').strip() for cell in row])
+
+        if not lignes_donnees:
+            return f"<h3>Le fichier est vide ou n'a pas pu être lu.</h3><br><a href='/'>Retour</a>"
+
+        headers = [str(h).lower().strip() for h in lignes_donnees[0]]
+
+        idx_mat = next((i for i, h in enumerate(headers) if 'matricule' in h), 0)
+        idx_nom = next((i for i, h in enumerate(headers) if 'nom' in h and 'prenom' not in h), 1)
+        idx_prenom = next((i for i, h in enumerate(headers) if 'prenom' in h), 2)
+        idx_salaire = next((i for i, h in enumerate(headers) if 'salaire' in h), 3)
+        idx_statut = next((i for i, h in enumerate(headers) if 'statut' in h), -1)
+        idx_site = next((i for i, h in enumerate(headers) if 'site' in h or 'affectation' in h), -1)
 
         conn = get_db_connection()
         cursor = conn.cursor()
         nb_importes = 0
-        lignes_traitees = 0
 
-        for row in reader:
-            lignes_traitees += 1
-            
-            # Récupération ultra flexible avec alternatives de noms de colonnes
-            matricule = (row.get('matricule') or row.get('matricules') or '').upper().strip()
-            nom = (row.get('nom') or row.get('noms') or '').strip()
-            prenom = (row.get('prenom') or row.get('prenoms') or '').strip()
-            salaire = (row.get('salaire') or row.get('salaire_base') or '0').strip()
-            statut = (row.get('statut') or 'Actif').strip()
-            nom_site = (row.get('site_id') or row.get('site') or row.get('affectation') or '').strip()
+        for row in lignes_donnees[1:]:
+            if len(row) <= max(idx_mat, idx_nom, idx_prenom):
+                continue
 
-            print(f"Ligne {lignes_traitees} -> Matricule: '{matricule}', Nom: '{nom}', Prenom: '{prenom}'")
+            matricule = str(row[idx_mat]).upper().strip()
+            nom = str(row[idx_nom]).strip()
+            prenom = str(row[idx_prenom]).strip()
+
+            salaire_str = str(row[idx_salaire]) if idx_salaire < len(row) else '0'
+            statut = str(row[idx_statut]) if (idx_statut != -1 and idx_statut < len(row)) else 'Actif'
+            nom_site = str(row[idx_site]) if (idx_site != -1 and idx_site < len(row)) else ''
 
             if not matricule or not nom or not prenom:
-                continue 
+                continue
 
-            # Éviter les doublons de clés primaires
             cursor.execute("SELECT matricule FROM employes WHERE matricule = %s", (matricule,))
             if cursor.fetchone():
-                continue  
+                continue
 
             id_site = None
             if nom_site:
                 cursor.execute("SELECT id FROM sites WHERE LOWER(nom) = %s", (nom_site.lower(),))
-                result_site = cursor.fetchone()
-                
-                if result_site:
-                    id_site = result_site[0]
+                res = cursor.fetchone()
+                if res:
+                    id_site = res[0]
                 else:
-                    cursor.execute("INSERT INTO sites (nom, adresse) VALUES (%s, %s)", (nom_site, "Créé via import automatique"))
+                    cursor.execute("INSERT INTO sites (nom, adresse) VALUES (%s, %s)", (nom_site, "Créé via import auto"))
                     if IS_RENDER:
                         cursor.execute("SELECT LASTVAL()")
                     else:
@@ -312,8 +335,7 @@ def importer_employes_csv():
                     id_site = cursor.fetchone()[0]
 
             try:
-                # Gère les salaires écrits avec des virgules à la française/francophone
-                salaire_flt = float(salaire.replace(',', '.'))
+                salaire_flt = float(salaire_str.replace(',', '.').replace(' ', ''))
             except ValueError:
                 salaire_flt = 0.0
 
@@ -326,22 +348,99 @@ def importer_employes_csv():
         conn.commit()
         cursor.close()
         conn.close()
-        
-        print(f"--- FIN IMPORT --- Lignes lues : {lignes_traitees} | Enregistrees : {nb_importes}")
-        
-        if nb_importes == 0:
-            return f"""
-            <h3>Succès : 0 employé enregistré.</h3>
-            <p><b>Pourquoi ?</b> Le fichier contient {lignes_traitees} lignes, mais aucune n'a pu être insérée (Champs obligatoires manquants ou matricules déjà existants).</p>
-            <p>Vérifie que tes colonnes contiennent bien : <code>matricule</code>, <code>nom</code>, et <code>prenom</code>.</p>
-            <br><a href='/'>Retour au tableau de bord</a>
-            """
-        
-        return f"<h3>Succès : {nb_importes} employé(s) enregistré(s) avec succès !</h3><br><a href='/'>Retour au tableau de bord</a>"
+
+        return f"<h3>Succès : {nb_importes} employé(s) enregistré(s) !</h3><br><a href='/'>Retour au tableau de bord</a>"
 
     except Exception as e:
-        print(f"Erreur critique lors de l'import CSV : {e}")
-        return f"<h3>Une erreur est survenue lors du traitement du fichier.</h3><p>{e}</p><br><a href='/'>Retour</a>"
+        print(f"Erreur d'importation : {e}")
+        return f"<h3>Erreur lors de la lecture du fichier :</h3><p>{e}</p><br><a href='/'>Retour</a>"
+
+
+# --- ROUTE D'IMPORTATION DE PAIE MULTI-FORMAT (EXCEL, WORD, PDF, CSV) ---
+@app.route('/importer_paie', methods=['POST'])
+def importer_paie():
+    if not session.get('est_admin'):
+        return redirect(url_for('espace_pointage'))
+
+    file = request.files.get('file_paie')
+    if not file or file.filename == '':
+        return f"<h3>Aucun fichier sélectionné.</h3><br><a href='/paie'>Retour</a>"
+
+    filename = file.filename.lower()
+    lignes_donnees = []
+
+    try:
+        if filename.endswith(('.xlsx', '.xls', '.csv')):
+            try:
+                if filename.endswith('.csv'):
+                    df = pd.read_csv(file, sep=None, engine='python', dtype=str)
+                else:
+                    df = pd.read_excel(file, dtype=str)
+                df = df.fillna('')
+                lignes_donnees = [df.columns.astype(str).tolist()] + df.values.tolist()
+            except Exception:
+                file.seek(0)
+                content = file.stream.read().decode("utf-8-sig", errors='ignore')
+                stream = io.StringIO(content)
+                separateur = ';' if ';' in content.split('\n')[0] else ','
+                reader = csv.reader(stream, delimiter=separateur)
+                lignes_donnees = list(reader)
+
+        elif filename.endswith('.docx'):
+            doc = docx.Document(file)
+            for table in doc.tables:
+                for row in table.rows:
+                    cells = [cell.text.strip() for cell in row.cells]
+                    if any(cells):
+                        lignes_donnees.append(cells)
+
+        elif filename.endswith('.pdf'):
+            with pdfplumber.open(file) as pdf:
+                for page in pdf.pages:
+                    tables = page.extract_tables()
+                    for table in tables:
+                        for row in table:
+                            if any(row):
+                                lignes_donnees.append([str(cell or '').strip() for cell in row])
+
+        if not lignes_donnees:
+            return f"<h3>Aucune donnée extraite du fichier.</h3><br><a href='/paie'>Retour</a>"
+
+        headers = [str(h).lower().strip() for h in lignes_donnees[0]]
+
+        idx_mat = next((i for i, h in enumerate(headers) if 'matricule' in h), 0)
+        idx_salaire = next((i for i, h in enumerate(headers) if 'salaire' in h or 'base' in h), -1)
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        nb_majd = 0
+
+        for row in lignes_donnees[1:]:
+            if len(row) <= idx_mat:
+                continue
+
+            matricule = str(row[idx_mat]).upper().strip()
+            if not matricule:
+                continue
+
+            if idx_salaire != -1 and idx_salaire < len(row):
+                try:
+                    sal_str = str(row[idx_salaire]).replace(',', '.').replace(' ', '')
+                    nouveau_salaire = float(sal_str)
+                    cursor.execute("UPDATE employes SET salaire_base = %s WHERE matricule = %s", (nouveau_salaire, matricule))
+                    nb_majd += 1
+                except ValueError:
+                    pass
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return f"<h3>Importation de la paie réussie ! {nb_majd} employé(s) mis à jour.</h3><br><a href='/paie'>Retour au Rapport de Paie</a>"
+
+    except Exception as e:
+        print(f"Erreur d'importation Paie : {e}")
+        return f"<h3>Erreur lors de l'importation de la paie :</h3><p>{e}</p><br><a href='/paie'>Retour</a>"
 
 
 @app.route('/supprimer_employe/<matricule>', methods=['POST'])
@@ -401,11 +500,9 @@ def exporter_paie_csv():
     cursor.execute("SELECT matricule, nom, prenom, salaire_base FROM employes")
     liste_employes = cursor.fetchall()
     
-    # Préparation du fichier CSV en mémoire
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';') 
     
-    # En-tête du tableau Excel
     writer.writerow(['Matricule', 'Employe', 'Total Heures', 'Taux Horaire (MRU/h)', 'Salaire a Verser (MRU)'])
     
     for emp in liste_employes:

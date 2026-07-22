@@ -63,11 +63,14 @@
             
             <br><hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;"><br>
             <div style="background-color: #f8f9fa; padding: 15px; border-radius: 6px; border-left: 4px solid #27ae60;">
-                <h3 style="margin-top: 0; color: #27ae60;">📊 Importation Excel / CSV Groupée</h3>
-                <p style="font-size: 0.85rem; color: #666; margin-bottom: 12px;">Enregistrez votre tableau Excel au format <strong>CSV (séparateur point-virgule)</strong> avec les en-têtes : <code>matricule;nom;prenom;salaire;statut;site_id</code></p>
+                <h3 style="margin-top: 0; color: #27ae60;">📊 Importation Groupée (CSV / Excel / PDF)</h3>
+                <p style="font-size: 0.85rem; color: #666; margin-bottom: 12px;">
+                    Sélectionnez votre fichier <strong>CSV, Excel (.xlsx) ou PDF</strong> contenant un tableau avec les colonnes : <br>
+                    <code>matricule;nom;prenom;salaire;statut;site</code>
+                </p>
                 <form action="/importer_employes_csv" method="POST" enctype="multipart/form-data">
                     <div class="form-group">
-                        <input type="file" name="file_excel" accept=".csv" required style="background: white; cursor: pointer;">
+                        <input type="file" name="file_excel" accept=".csv, .xlsx, .xls, .pdf" required style="background: white; cursor: pointer;">
                     </div>
                     <button type="submit" style="background-color: #27ae60;">📥 Lancer l'Importation</button>
                 </form>

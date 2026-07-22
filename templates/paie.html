@@ -12,17 +12,21 @@
         th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #ddd; }
         th { background-color: #2980b9; color: white; }
         
-        /* Conteneur pour aligner les boutons proprement */
         .action-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
         .btn-back { padding: 10px 15px; background-color: #7f8c8d; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; }
         .btn-export { padding: 10px 15px; background-color: #27ae60; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; margin-left: 10px; display: inline-block; }
         .total-money { font-weight: bold; color: #27ae60; }
+        
+        /* Style pour la zone d'importation */
+        .import-box { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-top: 4px solid #27ae60; margin-bottom: 25px; }
+        .import-box form { display: flex; gap: 15px; align-items: center; }
+        .import-box input[type="file"] { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 5px; background: #f9f9f9; }
+        .import-box button { background-color: #27ae60; color: white; border: none; padding: 10px 20px; border-radius: 5px; font-weight: bold; cursor: pointer; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <!-- Barre de boutons d'action -->
     <div class="action-bar">
         <a href="/" class="btn-back">⬅️ Retour au Tableau de Bord</a>
         <a href="/exporter_paie_csv" class="btn-export">📊 Exporter Excel (.csv)</a>
@@ -30,6 +34,17 @@
 
     <h1>Rapport de Paie et Heures Travaillées</h1>
     
+    <div class="import-box">
+        <h3 style="margin-top: 0; color: #27ae60;">📥 Importer un fichier de Paie (Excel, Word, PDF, CSV)</h3>
+        <p style="font-size: 0.85rem; color: #666; margin-bottom: 12px;">
+            Sélectionnez un fichier (<code>.xlsx</code>, <code>.docx</code>, <code>.pdf</code>, <code>.csv</code>) contenant la liste des employés et salaires.
+        </p>
+        <form action="/importer_paie" method="POST" enctype="multipart/form-data">
+            <input type="file" name="file_paie" accept=".csv, .xlsx, .xls, .pdf, .docx" required>
+            <button type="submit">Lancer l'Importation</button>
+        </form>
+    </div>
+
     <table>
         <thead>
             <tr>
