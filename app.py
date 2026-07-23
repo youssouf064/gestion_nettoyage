@@ -1,6 +1,7 @@
 import io
 import csv
 import os
+import re
 from datetime import datetime
 import openpyxl
 import pdfplumber
@@ -16,13 +17,11 @@ app.secret_key = "cle_secrete_super_securisee_youssouf"
 IS_RENDER = 'RENDER' in os.environ
 
 if IS_RENDER:
-    # Si on est sur Render -> On utilise PostgreSQL (Neon)
     import psycopg2
     DATABASE_URL = os.environ.get('DATABASE_URL')
     if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 else:
-    # Si on est sur le Chromebook -> On utilise MySQL/MariaDB local
     import mysql.connector
     DB_CONFIG_LOCAL = {
         'host': 'localhost',
@@ -68,12 +67,22 @@ def init_db():
             FOREIGN KEY(matricule_employe) REFERENCES employes(matricule) ON DELETE CASCADE,
             FOREIGN KEY(id_site) REFERENCES sites(id) ON DELETE CASCADE
         )''')
+        conn.commit()
         
-        try:
-            cursor.execute("ALTER TABLE pointages ADD COLUMN IF NOT EXISTS latitude REAL;")
-            cursor.execute("ALTER TABLE pointages ADD COLUMN IF NOT EXISTS longitude REAL;")
-        except Exception as e:
-            print(f"Note: Vérification ou ajout des colonnes GPS : {e}")
+        # Mises à jour des colonnes facultatives avec rollback sécurisé
+        colonnes_ajouts = [
+            "ALTER TABLE pointages ADD COLUMN IF NOT EXISTS latitude REAL;",
+            "ALTER TABLE pointages ADD COLUMN IF NOT EXISTS longitude REAL;",
+            "ALTER TABLE employes ADD COLUMN IF NOT EXISTS equipe VARCHAR(50) DEFAULT 'MATIN';",
+            "ALTER TABLE pointages ADD COLUMN IF NOT EXISTS equipe VARCHAR(50) DEFAULT 'MATIN';"
+        ]
+        for req in colonnes_ajouts:
+            try:
+                cursor.execute(req)
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                print(f"Note SQL (PostgreSQL) : {e}")
 
     else:
         cursor.execute('''CREATE TABLE IF NOT EXISTS sites (
@@ -102,14 +111,26 @@ def init_db():
             FOREIGN KEY(matricule_employe) REFERENCES employes(matricule) ON DELETE CASCADE,
             FOREIGN KEY(id_site) REFERENCES sites(id) ON DELETE CASCADE
         )''')
+        conn.commit()
         
         try:
             cursor.execute("ALTER TABLE pointages ADD COLUMN latitude REAL NULL;")
+        except Exception:
+            pass
+        try:
             cursor.execute("ALTER TABLE pointages ADD COLUMN longitude REAL NULL;")
         except Exception:
             pass
-        
-    conn.commit()
+        try:
+            cursor.execute("ALTER TABLE employes ADD COLUMN equipe VARCHAR(50) DEFAULT 'MATIN';")
+        except Exception:
+            pass
+        try:
+            cursor.execute("ALTER TABLE pointages ADD COLUMN equipe VARCHAR(50) DEFAULT 'MATIN';")
+        except Exception:
+            pass
+        conn.commit()
+
     cursor.close()
     conn.close()
 
@@ -153,7 +174,7 @@ def dashboard():
     liste_sites = cursor.fetchall()
     
     cursor.execute('''
-        SELECT e.matricule, e.nom, e.prenom, e.salaire_base, e.statut, s.nom 
+        SELECT e.matricule, e.nom, e.prenom, e.salaire_base, e.statut, s.nom, e.equipe 
         FROM employes e
         LEFT JOIN sites s ON e.id_site_affecte = s.id
     ''')
@@ -163,7 +184,7 @@ def dashboard():
     employes_en_conge = cursor.fetchall()
     
     cursor.execute('''
-        SELECT p.id, e.prenom, e.nom, s.nom, p.date_jour, p.heure_arrivee, p.heure_depart, p.latitude, p.longitude 
+        SELECT p.id, e.prenom, e.nom, s.nom, p.date_jour, p.heure_arrivee, p.heure_depart, p.latitude, p.longitude, COALESCE(p.equipe, 'MATIN') as equipe_p
         FROM pointages p
         JOIN employes e ON p.matricule_employe = e.matricule
         JOIN sites s ON p.id_site = s.id
@@ -188,8 +209,6 @@ def deconnexion():
     session.pop('est_admin', None)
     return redirect(url_for('espace_pointage'))
 
-
-# --- SÉCURISATION DES ACTIONS ADMINISTRATIVE ---
 
 @app.route('/ajouter_site', methods=['POST'])
 def ajouter_site():
@@ -219,21 +238,21 @@ def ajouter_employe():
     salaire = request.form.get('salaire')
     statut = request.form.get('statut')
     site_id = request.form.get('site_id')
+    equipe = request.form.get('equipe', 'MATIN').upper().strip()
     
     if matricule and nom and prenom and salaire:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO employes (matricule, nom, prenom, salaire_base, statut, id_site_affecte)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        ''', (matricule, nom, prenom, float(salaire), statut, int(site_id)))
+            INSERT INTO employes (matricule, nom, prenom, salaire_base, statut, id_site_affecte, equipe)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ''', (matricule, nom, prenom, float(salaire), statut, int(site_id), equipe))
         conn.commit()
         cursor.close()
         conn.close()
     return redirect(url_for('dashboard'))
 
 
-# --- IMPORTATION MULTI-FORMAT HYBRIDE ET ULTRA-ROBUSTE ---
 @app.route('/importer_employes_csv', methods=['POST'])
 def importer_employes_csv():
     if not session.get('est_admin'):
@@ -247,7 +266,6 @@ def importer_employes_csv():
     lignes_donnees = []
 
     try:
-        # 1. TENTATIVE LECTURE EXCEL / CSV ROBUSTE AVEC PANDAS
         if filename.endswith(('.xlsx', '.xls', '.csv')):
             try:
                 if filename.endswith('.csv'):
@@ -258,7 +276,6 @@ def importer_employes_csv():
                 df = df.fillna('')
                 lignes_donnees = [df.columns.astype(str).tolist()] + df.values.tolist()
             except Exception:
-                # Si le fichier .xlsx est en fait un CSV renommé
                 file.seek(0)
                 content = file.stream.read().decode("utf-8-sig", errors='ignore')
                 stream = io.StringIO(content)
@@ -266,7 +283,6 @@ def importer_employes_csv():
                 reader = csv.reader(stream, delimiter=separateur)
                 lignes_donnees = list(reader)
 
-        # 2. TRAITEMENT WORD (.docx)
         elif filename.endswith('.docx'):
             doc = docx.Document(file)
             for table in doc.tables:
@@ -275,7 +291,6 @@ def importer_employes_csv():
                     if any(cells):
                         lignes_donnees.append(cells)
 
-        # 3. TRAITEMENT PDF (.pdf)
         elif filename.endswith('.pdf'):
             with pdfplumber.open(file) as pdf:
                 for page in pdf.pages:
@@ -284,66 +299,109 @@ def importer_employes_csv():
                         for row in table:
                             if any(row):
                                 lignes_donnees.append([str(cell or '').strip() for cell in row])
+                    
+                    if not lignes_donnees:
+                        text = page.extract_text()
+                        if text:
+                            for line in text.split('\n'):
+                                if line.strip():
+                                    lignes_donnees.append([line.strip()])
 
         if not lignes_donnees:
             return f"<h3>Le fichier est vide ou n'a pas pu être lu.</h3><br><a href='/'>Retour</a>"
 
         headers = [str(h).lower().strip() for h in lignes_donnees[0]]
 
-        idx_mat = next((i for i, h in enumerate(headers) if 'matricule' in h), 0)
-        idx_nom = next((i for i, h in enumerate(headers) if 'nom' in h and 'prenom' not in h), 1)
-        idx_prenom = next((i for i, h in enumerate(headers) if 'prenom' in h), 2)
-        idx_salaire = next((i for i, h in enumerate(headers) if 'salaire' in h), 3)
+        idx_mat = next((i for i, h in enumerate(headers) if 'matricule' in h), -1)
+        idx_nom = next((i for i, h in enumerate(headers) if 'nom' in h and 'prenom' not in h), -1)
+        idx_prenom = next((i for i, h in enumerate(headers) if 'prenom' in h), -1)
+        idx_salaire = next((i for i, h in enumerate(headers) if 'salaire' in h), -1)
         idx_statut = next((i for i, h in enumerate(headers) if 'statut' in h), -1)
         idx_site = next((i for i, h in enumerate(headers) if 'site' in h or 'affectation' in h), -1)
+        idx_equipe = next((i for i, h in enumerate(headers) if 'equipe' in h or 'équipe' in h), -1)
 
         conn = get_db_connection()
         cursor = conn.cursor()
         nb_importes = 0
 
-        for row in lignes_donnees[1:]:
-            if len(row) <= max(idx_mat, idx_nom, idx_prenom):
-                continue
+        if idx_nom != -1 or idx_prenom != -1:
+            idx_mat = 0 if idx_mat == -1 else idx_mat
+            idx_nom = 1 if idx_nom == -1 else idx_nom
+            idx_prenom = 2 if idx_prenom == -1 else idx_prenom
+            idx_salaire = 3 if idx_salaire == -1 else idx_salaire
 
-            matricule = str(row[idx_mat]).upper().strip()
-            nom = str(row[idx_nom]).strip()
-            prenom = str(row[idx_prenom]).strip()
+            for row in lignes_donnees[1:]:
+                if len(row) <= max(idx_mat, idx_nom, idx_prenom):
+                    continue
 
-            salaire_str = str(row[idx_salaire]) if idx_salaire < len(row) else '0'
-            statut = str(row[idx_statut]) if (idx_statut != -1 and idx_statut < len(row)) else 'Actif'
-            nom_site = str(row[idx_site]) if (idx_site != -1 and idx_site < len(row)) else ''
+                matricule = str(row[idx_mat]).upper().strip()
+                nom = str(row[idx_nom]).strip()
+                prenom = str(row[idx_prenom]).strip()
 
-            if not matricule or not nom or not prenom:
-                continue
+                salaire_str = str(row[idx_salaire]) if idx_salaire < len(row) else '0'
+                statut = str(row[idx_statut]) if (idx_statut != -1 and idx_statut < len(row)) else 'Actif'
+                nom_site = str(row[idx_site]) if (idx_site != -1 and idx_site < len(row)) else ''
+                equipe = str(row[idx_equipe]).upper().strip() if (idx_equipe != -1 and idx_equipe < len(row)) else 'MATIN'
 
-            cursor.execute("SELECT matricule FROM employes WHERE matricule = %s", (matricule,))
-            if cursor.fetchone():
-                continue
+                if not matricule or not nom or not prenom:
+                    continue
 
-            id_site = None
-            if nom_site:
-                cursor.execute("SELECT id FROM sites WHERE LOWER(nom) = %s", (nom_site.lower(),))
-                res = cursor.fetchone()
-                if res:
-                    id_site = res[0]
-                else:
-                    cursor.execute("INSERT INTO sites (nom, adresse) VALUES (%s, %s)", (nom_site, "Créé via import auto"))
-                    if IS_RENDER:
-                        cursor.execute("SELECT LASTVAL()")
-                    else:
-                        cursor.execute("SELECT LAST_INSERT_ID()")
-                    id_site = cursor.fetchone()[0]
+                cursor.execute("SELECT matricule FROM employes WHERE matricule = %s", (matricule,))
+                if cursor.fetchone():
+                    continue
 
-            try:
-                salaire_flt = float(salaire_str.replace(',', '.').replace(' ', ''))
-            except ValueError:
-                salaire_flt = 0.0
+                id_site = get_or_create_site(cursor, nom_site)
 
-            cursor.execute('''
-                INSERT INTO employes (matricule, nom, prenom, salaire_base, statut, id_site_affecte)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            ''', (matricule, nom, prenom, salaire_flt, statut.capitalize(), id_site))
-            nb_importes += 1
+                try:
+                    salaire_flt = float(salaire_str.replace(',', '.').replace(' ', ''))
+                except ValueError:
+                    salaire_flt = 0.0
+
+                cursor.execute('''
+                    INSERT INTO employes (matricule, nom, prenom, salaire_base, statut, id_site_affecte, equipe)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ''', (matricule, nom, prenom, salaire_flt, statut.capitalize(), id_site, equipe))
+                nb_importes += 1
+
+        else:
+            equipe_courante = "MATIN"
+            
+            for ligne in lignes_donnees:
+                texte_ligne = " ".join([str(c) for c in ligne if c]).strip()
+                
+                if "equipe soir" in texte_ligne.lower() or "équipe soir" in texte_ligne.lower():
+                    equipe_courante = "SOIR"
+                elif "equipe matin" in texte_ligne.lower() or "équipe matin" in texte_ligne.lower():
+                    equipe_courante = "MATIN"
+
+                match = re.search(r'^\s*(\d+)?\s*([A-Za-zÀ-ÿ\'\-]+)\s+([A-Za-zÀ-ÿ\'\-\s]+)$', texte_ligne)
+                
+                if match:
+                    p1 = match.group(2).strip()
+                    p2 = match.group(3).strip()
+                    
+                    mots_ignores = ['vendredi', 'samedi', 'dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'entrée', 'sortie', 'fiche', 'pointage', 'note', 'admin']
+                    if any(m.lower() in p1.lower() or m.lower() in p2.lower() for m in mots_ignores):
+                        continue
+
+                    prenom = p1
+                    nom = p2
+                    
+                    cursor.execute("SELECT COUNT(*) FROM employes")
+                    total_existants = cursor.fetchone()[0]
+                    matricule = f"EMP-{total_existants + nb_importes + 1:03d}"
+
+                    cursor.execute("SELECT matricule FROM employes WHERE LOWER(nom) = %s AND LOWER(prenom) = %s", (nom.lower(), prenom.lower()))
+                    if cursor.fetchone():
+                        continue
+
+                    id_site = get_or_create_site(cursor, "BFI")
+
+                    cursor.execute('''
+                        INSERT INTO employes (matricule, nom, prenom, salaire_base, statut, id_site_affecte, equipe)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ''', (matricule, nom, prenom, 15000.0, 'Actif', id_site, equipe_courante))
+                    nb_importes += 1
 
         conn.commit()
         cursor.close()
@@ -356,7 +414,22 @@ def importer_employes_csv():
         return f"<h3>Erreur lors de la lecture du fichier :</h3><p>{e}</p><br><a href='/'>Retour</a>"
 
 
-# --- ROUTE D'IMPORTATION DE PAIE MULTI-FORMAT (EXCEL, WORD, PDF, CSV) ---
+def get_or_create_site(cursor, nom_site):
+    if not nom_site:
+        return None
+    cursor.execute("SELECT id FROM sites WHERE LOWER(nom) = %s", (nom_site.lower(),))
+    res = cursor.fetchone()
+    if res:
+        return res[0]
+    else:
+        cursor.execute("INSERT INTO sites (nom, adresse) VALUES (%s, %s)", (nom_site, "Créé via import auto"))
+        try:
+            cursor.execute("SELECT LASTVAL()")
+        except Exception:
+            cursor.execute("SELECT LAST_INSERT_ID()")
+        return cursor.fetchone()[0]
+
+
 @app.route('/importer_paie', methods=['POST'])
 def importer_paie():
     if not session.get('est_admin'):
@@ -458,6 +531,34 @@ def supprimer_employe(matricule):
     return redirect(url_for('dashboard'))
 
 
+@app.route('/modifier_equipe_employe/<matricule>', methods=['POST'])
+def modifier_equipe_employe(matricule):
+    if not session.get('est_admin'):
+        return redirect(url_for('espace_pointage'))
+
+    nouvelle_equipe = request.form.get('equipe', 'MATIN').upper()
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute('''
+            UPDATE employes 
+            SET equipe = %s 
+            WHERE matricule = %s
+        ''', (nouvelle_equipe, matricule))
+        
+        conn.commit()
+    except Exception as e:
+        print(f"Erreur lors du changement d'équipe : {e}")
+        conn.rollback()
+    finally:
+        cursor.close()
+        conn.close()
+
+    return redirect(url_for('dashboard'))
+
+
 @app.route('/paie')
 def rapport_paie():
     if not session.get('est_admin'):
@@ -489,6 +590,7 @@ def rapport_paie():
     cursor.close()
     conn.close()
     return render_template('paie.html', bilan=bilan_paie)
+
 
 @app.route('/exporter_paie_csv')
 def exporter_paie_csv():
@@ -530,6 +632,7 @@ def exporter_paie_csv():
         headers={"Content-disposition": "attachment; filename=Rapport_Paie_Nettoyage.csv"}
     )
 
+
 @app.route('/supprimer_site/<int:id>', methods=['POST'])
 def supprimer_site(id):
     if not session.get('est_admin'):
@@ -543,6 +646,7 @@ def supprimer_site(id):
         conn.commit()
     except Exception as e:
         print(f"Erreur lors de la suppression : {e}")
+        conn.rollback()
     finally:
         cursor.close()
         conn.close()
@@ -586,18 +690,49 @@ def modifier_site(id):
 def espace_pointage():
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT matricule, nom, prenom FROM employes WHERE statut = 'Actif'")
-    liste_employes = cursor.fetchall()
+    
+    site_id_selected = request.args.get('site_id')
+    
     cursor.execute("SELECT id, nom FROM sites")
     liste_sites = cursor.fetchall()
+    
+    if not site_id_selected and liste_sites:
+        site_id_selected = liste_sites[0][0]
+        
+    if site_id_selected:
+        cursor.execute("""
+            SELECT matricule, nom, prenom, COALESCE(equipe, 'MATIN') as equipe 
+            FROM employes 
+            WHERE statut = 'Actif' AND (id_site_affecte = %s OR id_site_affecte IS NULL)
+        """, (int(site_id_selected),))
+    else:
+        cursor.execute("""
+            SELECT matricule, nom, prenom, COALESCE(equipe, 'MATIN') as equipe 
+            FROM employes 
+            WHERE statut = 'Actif'
+        """)
+    
+    tous_employes = cursor.fetchall()
+    
+    employes_matin = [e for e in tous_employes if e[3].upper() == 'MATIN']
+    employes_soir = [e for e in tous_employes if e[3].upper() == 'SOIR']
+    
     cursor.close()
     conn.close()
-    return render_template('pointage.html', employes=liste_employes, sites=liste_sites)
+    
+    return render_template(
+        'pointage.html', 
+        sites=liste_sites, 
+        site_selected=int(site_id_selected) if site_id_selected else None,
+        employes_matin=employes_matin,
+        employes_soir=employes_soir
+    )
 
 @app.route('/executer_pointage', methods=['POST'])
 def executer_pointage():
     matricule = request.form.get('matricule')
     site_id = request.form.get('site_id')
+    equipe_form = request.form.get('equipe')
     action = request.form.get('action')
     lat = request.form.get('latitude')
     lng = request.form.get('longitude')
@@ -605,8 +740,6 @@ def executer_pointage():
     if not lat or lat.strip() == "": lat = None
     if not lng or lng.strip() == "": lng = None
 
-    print(f"Pointage reçu pour {matricule} au site {site_id}. Action: {action}. GPS: {lat}, {lng}")
-    
     date_aujourdhui = datetime.now().strftime('%Y-%m-%d')
     heure_actuelle = datetime.now().strftime('%H:%M:%S')
     
@@ -614,11 +747,18 @@ def executer_pointage():
     cursor = conn.cursor()
     
     try:
+        if not equipe_form:
+            cursor.execute("SELECT COALESCE(equipe, 'MATIN') FROM employes WHERE matricule = %s", (matricule,))
+            res = cursor.fetchone()
+            equipe = res[0] if res else 'MATIN'
+        else:
+            equipe = equipe_form.upper().strip()
+
         if action == 'arrivee':
             cursor.execute('''
-                INSERT INTO pointages (matricule_employe, id_site, date_jour, heure_arrivee, latitude, longitude)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            ''', (matricule, int(site_id), date_aujourdhui, heure_actuelle, lat, lng))
+                INSERT INTO pointages (matricule_employe, id_site, date_jour, heure_arrivee, latitude, longitude, equipe)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ''', (matricule, int(site_id), date_aujourdhui, heure_actuelle, lat, lng, equipe))
 
         elif action == 'depart':
             cursor.execute('''
@@ -655,22 +795,28 @@ def executer_pointage():
         message = "<h3>Pointage réussi ! Merci.</h3>"
     except Exception as e:
         conn.rollback()
-        print(f"Erreur lors du pointage : {e}")
         message = f"<h3>Une erreur est survenue lors de l'enregistrement.</h3><p>{e}</p>"
     finally:
         cursor.close()
         conn.close()
         
-    return f"{message}<br><a href='/pointage'>Retour</a>"
-
+    return f"{message}<br><a href='/pointage?site_id={site_id}'>Retour</a>"
+    
 def calculer_heures(arrivee, depart):
     if not arrivee or not depart:
         return 0.0
     fmt = '%H:%M:%S'
     t_arrivee = datetime.strptime(arrivee, fmt)
     t_depart = datetime.strptime(depart, fmt)
+    
+    # Prise en compte des shifts de nuit (ex: arrivée à 22h, départ à 04h)
     diff = t_depart - t_arrivee
-    return round(diff.total_seconds() / 3600, 2)
+    if diff.total_seconds() < 0:
+        diff_seconds = diff.total_seconds() + 86400
+    else:
+        diff_seconds = diff.total_seconds()
+        
+    return round(diff_seconds / 3600, 2)
 
 
 if __name__ == '__main__':

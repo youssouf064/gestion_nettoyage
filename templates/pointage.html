@@ -3,74 +3,165 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Espace Superviseur - Pointage Terrain</title>
+    <title>Cleaner Ecolo - Pointage Terrain</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background-color: #eef2f3; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-        .mobile-card { background: white; width: 100%; max-width: 400px; padding: 25px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); text-align: center; }
-        h2 { color: #2c3e50; margin-bottom: 5px; }
-        p.subtitle { color: #e67e22; font-size: 0.95rem; font-weight: bold; margin-bottom: 25px; text-transform: uppercase; letter-spacing: 0.5px; }
-        label { display: block; text-align: left; font-weight: bold; margin-bottom: 8px; color: #34495e; }
-        select { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #bdc3c7; font-size: 1rem; margin-bottom: 20px; background-color: #fff; }
-        .btn-capture { width: 100%; padding: 15px; border-radius: 8px; font-size: 1.1rem; font-weight: bold; border: none; color: white; cursor: pointer; margin-bottom: 12px; transition: transform 0.2s; }
-        .btn-capture:active { transform: scale(0.98); }
-        .btn-in { background-color: #2ecc71; box-shadow: 0 4px 10px rgba(46, 204, 113, 0.3); }
-        .btn-out { background-color: #e74c3c; box-shadow: 0 4px 10px rgba(231, 76, 60, 0.3); }
-        #gps-status { font-size: 0.85rem; color: #7f8c8d; margin-top: 15px; font-style: italic; }
-        .info-box { background-color: #f8f9fa; border-left: 4px solid #e67e22; padding: 10px; text-align: left; margin-bottom: 20px; font-size: 0.9rem; border-radius: 4px; }
+        body { font-family: 'Segoe UI', sans-serif; background-color: #eef2f3; margin: 0; padding: 15px; }
+        .card { background: white; max-width: 700px; margin: 0 auto; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        
+        /* Style Header Entreprise & Logo */
+        .header-brand { text-align: center; margin-bottom: 15px; }
+        .brand-logo-badge {
+            background: linear-gradient(135deg, #198754, #20c997);
+            color: white;
+            font-weight: 800;
+            padding: 6px 14px;
+            border-radius: 8px;
+            display: inline-block;
+            font-size: 1.1rem;
+            margin-bottom: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+        }
+        .company-title { color: #198754; font-size: 1.3rem; font-weight: bold; margin: 5px 0 0 0; text-transform: uppercase; }
+
+        /* Style Infos Admin */
+        .admin-info {
+            background-color: #f8f9fa;
+            border: 1px dashed #bdc3c7;
+            padding: 8px 12px;
+            border-radius: 6px;
+            text-align: center;
+            font-size: 0.85rem;
+            color: #2c3e50;
+            margin: 10px auto 15px auto;
+            max-width: 90%;
+        }
+
+        h2 { color: #2c3e50; text-align: center; margin-bottom: 5px; margin-top: 10px; }
+        .subtitle { color: #e67e22; font-size: 0.9rem; text-align: center; font-weight: bold; text-transform: uppercase; margin-bottom: 20px; }
+        .select-site { width: 100%; padding: 12px; font-size: 1rem; border-radius: 8px; border: 1px solid #bdc3c7; margin-bottom: 20px; background: #fff; }
+        
+        .section-title { background: #34495e; color: white; padding: 8px 12px; border-radius: 6px; font-size: 1rem; margin-top: 20px; }
+        .section-title.soir { background: #8e44ad; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; font-size: 0.95rem; }
+        th { background-color: #f8f9fa; }
+        
+        .btn-action { padding: 6px 12px; border: none; border-radius: 5px; color: white; cursor: pointer; font-weight: bold; font-size: 0.85rem; }
+        .btn-in { background-color: #2ecc71; }
+        .btn-out { background-color: #e74c3c; }
+        
+        #gps-status { font-size: 0.85rem; color: #7f8c8d; text-align: center; margin-top: 20px; font-style: italic; }
     </style>
 </head>
 <body>
 
-<div class="mobile-card">
-    <h2>⏱️ Portail Terrain</h2>
-    <p class="subtitle">Espace Chef d'Équipe</p>
-    
-    <div class="info-box">
-        <strong>Rappel Superviseur :</strong> Veuillez sélectionner l'agent présent devant vous et valider son état de présence sur le site.
+<div class="card">
+    <!-- LOGO ET NOM DE L'ENTREPRISE -->
+    <div class="header-brand">
+        <div class="brand-logo-badge">🍃 Cleaner Ecolo</div>
+        <div class="company-title">Cleaner Ecolo Cleaner</div>
     </div>
-    
+
+    <!-- INFOS ADMIN -->
+    <div class="admin-info">
+        <strong>ADMIN :</strong> BOCAR DIOP &nbsp;|&nbsp; <strong>TEL :</strong> 34 63 47 97
+    </div>
+
+    <h2>⏱️ Fiche de Pointage Terrain</h2>
+    <p class="subtitle">Espace Superviseur</p>
+
+    <!-- Formulaire caché d'envoi du pointage -->
     <form id="formPointage" action="/executer_pointage" method="POST">
         <input type="hidden" id="latitude" name="latitude">
         <input type="hidden" id="longitude" name="longitude">
-        <input type="hidden" id="actionInput" name="action" value="arrivee">
-
-        <label>Sélectionnez l'Agent :</label>
-        <select name="matricule" required>
-            {% for e in employes %}
-                <option value="{{ e[0] }}">{{ e[2] }} {{ e[1] }} ({{ e[0] }})</option>
-            {% endfor %}
-        </select>
-
-        <label>Site Client Actuel :</label>
-        <select name="site_id" required>
-            {% for s in sites %}
-                <option value="{{ s[0] }}">{{ s[1] }}</option>
-            {% endfor %}
-        </select>
-
-        <button type="button" onclick="soumettreAvecGPS('arrivee')" class="btn-capture btn-in">📍 Pointer l'Arrivée de l'Agent</button>
-        <button type="button" onclick="soumettreAvecGPS('depart')" class="btn-capture btn-out">🚪 Pointer le Départ de l'Agent</button>
+        <input type="hidden" id="matriculeInput" name="matricule">
+        <input type="hidden" id="equipeInput" name="equipe">
+        <input type="hidden" id="actionInput" name="action">
+        <input type="hidden" name="site_id" value="{{ site_selected }}">
     </form>
 
-    <div id="gps-status">Recherche du signal GPS du superviseur...</div>
+    <!-- Sélection du Site -->
+    <label><strong>Changer de Site :</strong></label>
+    <select class="select-site" onchange="window.location.href='/pointage?site_id=' + this.value">
+        {% for s in sites %}
+            <option value="{{ s[0] }}" {% if s[0] == site_selected %}selected{% endif %}>{{ s[1] }}</option>
+        {% endfor %}
+    </select>
+
+    <!-- ÉQUIPE MATIN -->
+    <div class="section-title">☀️ ÉQUIPE DU MATIN</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Matricule</th>
+                <th>Agent</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for e in employes_matin %}
+            <tr>
+                <td><strong>{{ e[0] }}</strong></td>
+                <td>{{ e[2] }} {{ e[1] }}</td>
+                <td>
+                    <button onclick="pointerAgent('{{ e[0] }}', 'MATIN', 'arrivee')" class="btn-action btn-in">Arrivée</button>
+                    <button onclick="pointerAgent('{{ e[0] }}', 'MATIN', 'depart')" class="btn-action btn-out">Départ</button>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" style="text-align: center; color: #7f8c8d;">Aucun agent affecté au matin</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- ÉQUIPE SOIR -->
+    <div class="section-title soir">🌙 ÉQUIPE DU SOIR</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Matricule</th>
+                <th>Agent</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for e in employes_soir %}
+            <tr>
+                <td><strong>{{ e[0] }}</strong></td>
+                <td>{{ e[2] }} {{ e[1] }}</td>
+                <td>
+                    <button onclick="pointerAgent('{{ e[0] }}', 'SOIR', 'arrivee')" class="btn-action btn-in">Arrivée</button>
+                    <button onclick="pointerAgent('{{ e[0] }}', 'SOIR', 'depart')" class="btn-action btn-out">Départ</button>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" style="text-align: center; color: #7f8c8d;">Aucun agent affecté au soir</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div id="gps-status">Recherche du signal GPS...</div>
 </div>
 
 <script>
+    // Suivi GPS du superviseur
     if (navigator.geolocation) {
         navigator.geolocation.watchPosition(function(position) {
             document.getElementById('latitude').value = position.coords.latitude;
             document.getElementById('longitude').value = position.coords.longitude;
-            document.getElementById('gps-status').innerHTML = "🔒 Position du Superviseur Validée par GPS";
+            document.getElementById('gps-status').innerHTML = "🔒 Position GPS Superviseur Validée";
             document.getElementById('gps-status').style.color = "#2ecc71";
         }, function(error) {
-            document.getElementById('gps-status').innerHTML = "⚠️ Activez le GPS pour valider votre présence sur site";
+            document.getElementById('gps-status').innerHTML = "⚠️ Veuillez activer le GPS sur votre mobile";
             document.getElementById('gps-status').style.color = "#e74c3c";
         }, { enableHighAccuracy: true });
-    } else {
-        document.getElementById('gps-status').innerHTML = "Géolocalisation non supportée";
     }
 
-    function soumettreAvecGPS(actionType) {
+    // Fonction de soumission dynamique du formulaire
+    function pointerAgent(matricule, equipe, actionType) {
+        document.getElementById('matriculeInput').value = matricule;
+        document.getElementById('equipeInput').value = equipe;
         document.getElementById('actionInput').value = actionType;
         document.getElementById('formPointage').submit();
     }
