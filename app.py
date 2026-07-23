@@ -74,7 +74,10 @@ def init_db():
             "ALTER TABLE pointages ADD COLUMN IF NOT EXISTS latitude REAL;",
             "ALTER TABLE pointages ADD COLUMN IF NOT EXISTS longitude REAL;",
             "ALTER TABLE employes ADD COLUMN IF NOT EXISTS equipe VARCHAR(50) DEFAULT 'MATIN';",
-            "ALTER TABLE pointages ADD COLUMN IF NOT EXISTS equipe VARCHAR(50) DEFAULT 'MATIN';"
+            "ALTER TABLE pointages ADD COLUMN IF NOT EXISTS equipe VARCHAR(50) DEFAULT 'MATIN';",
+            "ALTER TABLE pointages ADD COLUMN IF NOT EXISTS fiche_id VARCHAR(100);",
+            "ALTER TABLE pointages ADD COLUMN IF NOT EXISTS agent VARCHAR(255);",
+            "ALTER TABLE pointages ADD COLUMN IF NOT EXISTS observations TEXT;"
         ]
         for req in colonnes_ajouts:
             try:
@@ -113,22 +116,20 @@ def init_db():
         )''')
         conn.commit()
         
-        try:
-            cursor.execute("ALTER TABLE pointages ADD COLUMN latitude REAL NULL;")
-        except Exception:
-            pass
-        try:
-            cursor.execute("ALTER TABLE pointages ADD COLUMN longitude REAL NULL;")
-        except Exception:
-            pass
-        try:
-            cursor.execute("ALTER TABLE employes ADD COLUMN equipe VARCHAR(50) DEFAULT 'MATIN';")
-        except Exception:
-            pass
-        try:
-            cursor.execute("ALTER TABLE pointages ADD COLUMN equipe VARCHAR(50) DEFAULT 'MATIN';")
-        except Exception:
-            pass
+        colonnes_mysql = [
+            "ALTER TABLE pointages ADD COLUMN latitude REAL NULL;",
+            "ALTER TABLE pointages ADD COLUMN longitude REAL NULL;",
+            "ALTER TABLE employes ADD COLUMN equipe VARCHAR(50) DEFAULT 'MATIN';",
+            "ALTER TABLE pointages ADD COLUMN equipe VARCHAR(50) DEFAULT 'MATIN';",
+            "ALTER TABLE pointages ADD COLUMN fiche_id VARCHAR(100) NULL;",
+            "ALTER TABLE pointages ADD COLUMN agent VARCHAR(255) NULL;",
+            "ALTER TABLE pointages ADD COLUMN observations TEXT NULL;"
+        ]
+        for req in colonnes_mysql:
+            try:
+                cursor.execute(req)
+            except Exception:
+                pass
         conn.commit()
 
     cursor.close()
@@ -184,7 +185,7 @@ def dashboard():
     employes_en_conge = cursor.fetchall()
     
     cursor.execute('''
-        SELECT p.id, e.prenom, e.nom, s.nom, p.date_jour, p.heure_arrivee, p.heure_depart, p.latitude, p.longitude, COALESCE(p.equipe, 'MATIN') as equipe_p
+        SELECT p.id, e.prenom, e.nom, s.nom, p.date_jour, p.heure_arrivee, p.heure_depart, p.latitude, p.longitude, COALESCE(p.equipe, 'MATIN') as equipe_p, p.fiche_id, p.agent, p.observations
         FROM pointages p
         JOIN employes e ON p.matricule_employe = e.matricule
         JOIN sites s ON p.id_site = s.id
@@ -264,6 +265,7 @@ def importer_employes_csv():
 
     filename = file.filename.lower()
     lignes_donnees = []
+    texte_complet_pdf = ""
 
     try:
         if filename.endswith(('.xlsx', '.xls', '.csv')):
@@ -294,23 +296,40 @@ def importer_employes_csv():
         elif filename.endswith('.pdf'):
             with pdfplumber.open(file) as pdf:
                 for page in pdf.pages:
+                    text_p = page.extract_text() or ""
+                    texte_complet_pdf += text_p + "\n"
                     tables = page.extract_tables()
                     for table in tables:
                         for row in table:
                             if any(row):
                                 lignes_donnees.append([str(cell or '').strip() for cell in row])
                     
-                    if not lignes_donnees:
-                        text = page.extract_text()
-                        if text:
-                            for line in text.split('\n'):
-                                if line.strip():
-                                    lignes_donnees.append([line.strip()])
+                    if not lignes_donnees and text_p:
+                        for line in text_p.split('\n'):
+                            if line.strip():
+                                lignes_donnees.append([line.strip()])
 
-        if not lignes_donnees:
+        if not lignes_donnees and not texte_complet_pdf:
             return f"<h3>Le fichier est vide ou n'a pas pu être lu.</h3><br><a href='/'>Retour</a>"
 
-        headers = [str(h).lower().strip() for h in lignes_donnees[0]]
+        # Extraction des métadonnées dynamique (fiche_id, agent, observations)
+        fiche_id = None
+        agent_nom = None
+        observations = None
+
+        m_fiche = re.search(r'(?:FICHE|N[°º]|REF)\s*[:#-]?\s*([A-Z0-9-]+)', texte_complet_pdf, re.IGNORECASE)
+        if m_fiche:
+            fiche_id = m_fiche.group(1).strip()
+
+        m_agent = re.search(r'(?:AGENT|RESPONSABLE|SUPERVISEUR)\s*[:#-]?\s*([A-Za-zÀ-ÿ\s-]+)', texte_complet_pdf, re.IGNORECASE)
+        if m_agent:
+            agent_nom = m_agent.group(1).split('\n')[0].strip()
+
+        m_obs = re.search(r'(?:REMARQUES|OBSERVATIONS|NOTE)\s*[:#-]?\s*(.*)', texte_complet_pdf, re.IGNORECASE | re.DOTALL)
+        if m_obs:
+            observations = m_obs.group(1).strip()
+
+        headers = [str(h).lower().strip() for h in lignes_donnees[0]] if lignes_donnees else []
 
         idx_mat = next((i for i, h in enumerate(headers) if 'matricule' in h), -1)
         idx_nom = next((i for i, h in enumerate(headers) if 'nom' in h and 'prenom' not in h), -1)
@@ -736,6 +755,9 @@ def executer_pointage():
     action = request.form.get('action')
     lat = request.form.get('latitude')
     lng = request.form.get('longitude')
+    fiche_id = request.form.get('fiche_id')
+    agent = request.form.get('agent')
+    observations = request.form.get('observations')
 
     if not lat or lat.strip() == "": lat = None
     if not lng or lng.strip() == "": lng = None
@@ -756,9 +778,9 @@ def executer_pointage():
 
         if action == 'arrivee':
             cursor.execute('''
-                INSERT INTO pointages (matricule_employe, id_site, date_jour, heure_arrivee, latitude, longitude, equipe)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ''', (matricule, int(site_id), date_aujourdhui, heure_actuelle, lat, lng, equipe))
+                INSERT INTO pointages (matricule_employe, id_site, date_jour, heure_arrivee, latitude, longitude, equipe, fiche_id, agent, observations)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ''', (matricule, int(site_id), date_aujourdhui, heure_actuelle, lat, lng, equipe, fiche_id, agent, observations))
 
         elif action == 'depart':
             cursor.execute('''
@@ -809,7 +831,6 @@ def calculer_heures(arrivee, depart):
     t_arrivee = datetime.strptime(arrivee, fmt)
     t_depart = datetime.strptime(depart, fmt)
     
-    # Prise en compte des shifts de nuit (ex: arrivée à 22h, départ à 04h)
     diff = t_depart - t_arrivee
     if diff.total_seconds() < 0:
         diff_seconds = diff.total_seconds() + 86400
