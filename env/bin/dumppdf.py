@@ -1,4 +1,4 @@
-#!/home/youssoufseme064/gestion_nettoyage/env/bin/python3
+#!/home/youssoufseme064/projets/gestion_nettoyage/env/bin/python3
 """Extract pdf structure in XML format"""
 
 import logging
